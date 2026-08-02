@@ -19,6 +19,7 @@ private:
     void AnnounceLoop();
     void ListenLoop();
     void SendMDNSResponse();
+
     std::string GetLocalIPAddress();
     std::string GetLocalMacAddress();
 
