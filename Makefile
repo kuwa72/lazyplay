@@ -1,14 +1,28 @@
+CC = gcc
 CXX = g++
-CXXFLAGS = -std=c++17 -Wall -Wextra -O2 -municode
-LDFLAGS = -lws2_32 -ldnsapi -ld3d11 -ldxva2 -lmfplat -lmfuuid -lstrmiids -lgdi32 -lole32 -liphlpapi
+CFLAGS = -std=c11 -O2 -w -MMD -MP
+CXXFLAGS = -std=c++17 -Wall -Wextra -O2 -municode -MMD -MP
+LDFLAGS = -lws2_32 -ldnsapi -ld3d11 -ld3dcompiler -ldxva2 -lmfplat -lmfuuid -lstrmiids -lgdi32 -lole32 -liphlpapi
 
-SRCS = src/main.cpp \
+CXX_SRCS = src/main.cpp \
        src/mdns_sd.cpp \
        src/rtsp_server.cpp \
        src/decoder_d3d11.cpp \
-       src/renderer_d3d11.cpp
+       src/renderer_d3d11.cpp \
+       src/sha512.cpp \
+       src/aes_ctr.cpp \
+       src/fairplay.cpp \
+       src/bplist.cpp \
+       src/video_stream.cpp \
+       src/ntp_timing.cpp
 
-OBJS = $(SRCS:.cpp=.o)
+C_SRCS = src/playfair/playfair.c \
+       src/playfair/hand_garble.c \
+       src/playfair/modified_md5.c \
+       src/playfair/omg_hax.c \
+       src/playfair/sap_hash.c
+
+OBJS = $(CXX_SRCS:.cpp=.o) $(C_SRCS:.c=.o)
 TARGET = lazyplay.exe
 
 all: $(TARGET)
@@ -19,7 +33,25 @@ $(TARGET): $(OBJS)
 %.o: %.cpp
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
-clean:
-	rm -f $(OBJS) $(TARGET)
+%.o: %.c
+	$(CC) $(CFLAGS) -c $< -o $@
 
-.PHONY: all clean
+TEST_OBJS = test/test_all.o src/sha512.o src/aes_ctr.o src/bplist.o src/fairplay.o \
+       src/decoder_d3d11.o src/renderer_d3d11.o \
+       src/playfair/playfair.o src/playfair/hand_garble.o src/playfair/modified_md5.o \
+       src/playfair/omg_hax.o src/playfair/sap_hash.o
+
+test/test_all.exe: $(TEST_OBJS)
+	$(CXX) $(TEST_OBJS) -o $@ $(LDFLAGS)
+
+test: test/test_all.exe
+	./test/test_all.exe unit
+
+DEPS = $(OBJS:.o=.d) $(TEST_OBJS:.o=.d)
+
+clean:
+	rm -f $(OBJS) $(TARGET) test/test_all.o test/test_all.exe $(DEPS)
+
+-include $(DEPS)
+
+.PHONY: all clean test

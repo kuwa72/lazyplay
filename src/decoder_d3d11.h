@@ -12,23 +12,40 @@
 
 using Microsoft::WRL::ComPtr;
 
+// Hardware H.264 decoder (Windows Media Foundation MFT backed by DXVA2/D3D11).
+// No software decode fallback: if the hardware MFT is unavailable, Initialize
+// fails and the caller keeps displaying the idle screen (per REQUIREMENTS 2.2).
 class D3D11H264Decoder {
 public:
     D3D11H264Decoder();
     ~D3D11H264Decoder();
 
-    bool Initialize(ID3D11Device* d3d11Device, uint32_t width = 1280, uint32_t height = 720);
+    bool Initialize(ID3D11Device* d3d11Device);
     void Shutdown();
 
-    // Decode NAL unit packet (H.264 Annex-B or AVCC format)
-    bool DecodePacket(const uint8_t* data, size_t size, std::vector<uint8_t>& outFrame, uint32_t& outWidth, uint32_t& outHeight);
+    // Decode one Annex-B access unit. Returns true when a frame was produced.
+    // GPU path: outTexture/outSubresource + outSampleHolder (keeps the MFT pool
+    //   buffer alive; release after the frame has been consumed).
+    // CPU path (rare; e.g. MFT refuses D3D output): outCpu receives NV12 data.
+    bool Decode(const uint8_t* data, size_t size,
+                ComPtr<ID3D11Texture2D>& outTexture, uint32_t& outSubresource,
+                ComPtr<IMFSample>& outSampleHolder,
+                std::vector<uint8_t>& outCpu, uint32_t& outCpuPitch,
+                uint32_t& outWidth, uint32_t& outHeight);
 
 private:
     bool SetupMFT();
+    bool SetOutputType();
+    bool HandleOutput(ComPtr<IMFSample>& sample,
+                      ComPtr<ID3D11Texture2D>& outTexture, uint32_t& outSubresource,
+                      ComPtr<IMFSample>& outSampleHolder,
+                      std::vector<uint8_t>& outCpu, uint32_t& outCpuPitch,
+                      uint32_t& outWidth, uint32_t& outHeight);
 
     bool m_initialized = false;
     uint32_t m_width = 1280;
     uint32_t m_height = 720;
+    int64_t m_sampleTime = 0;
 
     ComPtr<IMFTransform> m_mftDecoder;
     ComPtr<IMFDXGIDeviceManager> m_dxgiManager;

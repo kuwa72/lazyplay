@@ -2,6 +2,7 @@
 *.exe
 *.o
 *.obj
+*.d
 *.log
 
 # VS Code / IDE

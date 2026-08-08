@@ -1,0 +1,55 @@
+name: build
+
+on:
+  push:
+    branches: [master]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: write # needed to attach binaries to releases
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup MSYS2 (UCRT64 MinGW toolchain)
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: false
+          install: >-
+            make
+            mingw-w64-ucrt-x86_64-gcc
+
+      - name: Build
+        shell: msys2 {0}
+        run: make 2>&1
+
+      - name: Unit tests (crypto / bplist)
+        shell: msys2 {0}
+        run: |
+          make test/test_all.exe
+          ./test/test_all.exe unit
+        # Note: the decode/E2E suites need a real GPU + desktop session and are
+        # not run on headless CI runners.
+
+      - name: Package binary
+        shell: pwsh
+        run: |
+          strip lazyplay.exe
+          Compress-Archive -Path lazyplay.exe, README.md, LICENSE -DestinationPath lazyplay-win-x64.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lazyplay-win-x64
+          path: lazyplay-win-x64.zip
+
+      - name: Release on tag
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: lazyplay-win-x64.zip

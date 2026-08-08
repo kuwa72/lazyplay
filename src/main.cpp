@@ -3,6 +3,9 @@
 #include <iostream>
 #include <string>
 #include <vector>
+#include <algorithm>
+#include <cctype>
+
 #include "renderer_d3d11.h"
 #include "decoder_d3d11.h"
 #include "mdns_sd.h"
@@ -10,6 +13,21 @@
 
 // Global Application Instance
 D3D11Renderer* g_renderer = nullptr;
+
+namespace {
+
+std::string SanitizeHostLabel(const std::string& name) {
+    std::string out;
+    for (char c : name) {
+        unsigned char uc = static_cast<unsigned char>(c);
+        if (std::isalnum(uc) || c == '-') out.push_back(c);
+        else out.push_back('-');
+    }
+    if (out.empty()) out = "lazyplay";
+    return out;
+}
+
+} // namespace
 
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     switch (uMsg) {
@@ -62,6 +80,8 @@ int main(int argc, char* argv[]) {
             } else if (res == "720p") {
                 width = 1280; height = 720;
             }
+        } else if (arg == "-vsync" && i + 1 < argc) {
+            vsync = (std::stoi(argv[++i]) != 0);
         } else if (arg == "-novsync") {
             vsync = false;
         }
@@ -108,26 +128,80 @@ int main(int argc, char* argv[]) {
     }
     g_renderer = &renderer;
 
-    // Initialize D3D11 / DXVA2 Hardware H.264 Decoder
+    // Initialize D3D11 / DXVA2 Hardware H.264 Decoder (no software fallback, REQUIREMENTS 2.2)
     D3D11H264Decoder decoder;
-    if (!decoder.Initialize(renderer.GetDevice(), width, height)) {
-        std::cerr << "[Warning] DXVA2 Hardware Decoder fallback notice." << std::endl;
+    if (!decoder.Initialize(renderer.GetDevice())) {
+        std::cerr << "[Warning] Hardware decoder unavailable; video will not be decoded." << std::endl;
     }
 
-    // Start mDNS Service Discovery
-    MDNSService mdns;
-    mdns.Start(deviceName, 7000, 5000);
+    // AirPlay service identity
+    AirPlayAdvertiseInfo advertise;
+    advertise.deviceName = deviceName;
+    advertise.macColon = GetLocalMacAddress();
+    advertise.macPlain = advertise.macColon;
+    advertise.macPlain.erase(std::remove(advertise.macPlain.begin(), advertise.macPlain.end(), ':'), advertise.macPlain.end());
+    advertise.hostName = SanitizeHostLabel(deviceName) + ".local";
+    advertise.airplayPort = 7000;
+    advertise.raopPort = 5000;
 
-    // Start RTSP Server
+    // Start mDNS Service Discovery (_airplay._tcp + _raop._tcp)
+    MDNSService mdns;
+    mdns.Start(advertise);
+
+    // AirPlay RTSP server (port 7000) with the video pipeline wired in
     RTSPServer rtsp;
-    rtsp.SetVideoFrameCallback([&](const uint8_t* data, size_t size) {
-        std::vector<uint8_t> frameData;
-        uint32_t fWidth = width, fHeight = height;
-        if (decoder.DecodePacket(data, size, frameData, fWidth, fHeight)) {
-            renderer.RenderFrame(frameData.data(), fWidth, fHeight, fWidth * 4);
+    AirPlayServerConfig config;
+    config.advertise = advertise;
+    config.displayWidth = static_cast<uint16_t>(width);
+    config.displayHeight = static_cast<uint16_t>(height);
+    config.maxFps = static_cast<uint8_t>(targetFps);
+    config.refreshRate = 60;
+    config.airplayTxt = BuildAirPlayTxt(advertise);
+    config.raopTxt = BuildRaopTxt(advertise);
+    rtsp.SetConfig(config);
+
+    VideoDataCallback videoCallback = [&](const uint8_t* data, size_t size) {
+        static uint64_t decodeCalls = 0, decodeOk = 0;
+        decodeCalls++;
+
+        ComPtr<ID3D11Texture2D> texture;
+        uint32_t subresource = 0, frameWidth = 0, frameHeight = 0, cpuPitch = 0;
+        ComPtr<IMFSample> sampleHolder;
+        std::vector<uint8_t> cpuFrame;
+        if (decoder.Decode(data, size, texture, subresource, sampleHolder,
+                           cpuFrame, cpuPitch, frameWidth, frameHeight)) {
+            decodeOk++;
+            if (texture) {
+                renderer.RenderNV12Frame(texture.Get(), subresource, frameWidth, frameHeight);
+            } else if (!cpuFrame.empty()) {
+                renderer.RenderNV12Cpu(cpuFrame.data(), frameWidth, frameHeight, cpuPitch);
+            }
         }
-    });
-    rtsp.Start(7000);
+        if (decodeCalls <= 5 || decodeCalls % 60 == 0) {
+            std::cout << "[Video] decode calls=" << decodeCalls << " frames-out=" << decodeOk
+                      << " (input " << size << "B)" << std::endl;
+        }
+    };
+    VideoSizeCallback sizeCallback = [](uint32_t w, uint32_t h) {
+        std::cout << "[Video] Client reports stream size: " << w << "x" << h << std::endl;
+    };
+    rtsp.SetVideoDataCallback(videoCallback);
+    rtsp.SetVideoSizeCallback(sizeCallback);
+    rtsp.Start(advertise.airplayPort);
+
+    // RAOP endpoint (port 5000): AirPlay 2 clients run the whole session
+    // (including mirroring) over the _raop._tcp port, so wire the same
+    // callbacks into this instance too. Audio is still discarded (REQUIREMENTS 2.4).
+    RTSPServer raop;
+    raop.SetConfig(config);
+    raop.SetVideoDataCallback(videoCallback);
+    raop.SetVideoSizeCallback(sizeCallback);
+    raop.Start(advertise.raopPort);
+
+    // Frame pacing: when vsync is on, Present() blocks on the sync interval
+    // (60Hz display assumed); otherwise fall back to a sleep-based limiter.
+    uint32_t syncInterval = targetFps >= 60 ? 1 : static_cast<uint32_t>(60 / (targetFps ? targetFps : 30));
+    renderer.SetSyncInterval(syncInterval);
 
     // Main Win32 Event Loop
     MSG msg = {};
@@ -142,12 +216,17 @@ int main(int argc, char* argv[]) {
             DispatchMessageW(&msg);
         }
 
-        renderer.Present();
-        Sleep(1000 / targetFps); // Limit FPS
+        bool presented = renderer.Present(); // skipped when no new frame arrived
+        if (!vsync) {
+            Sleep(1000 / targetFps); // Limit FPS
+        } else if (!presented) {
+            Sleep(4); // idle: keep the message pump responsive without busy-waiting
+        }
     }
 
     // Cleanup Resources
     rtsp.Stop();
+    raop.Stop();
     mdns.Stop();
     decoder.Shutdown();
     renderer.Cleanup();
