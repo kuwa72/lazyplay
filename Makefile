@@ -2,7 +2,10 @@ CC = gcc
 CXX = g++
 CFLAGS = -std=c11 -O2 -w -MMD -MP
 CXXFLAGS = -std=c++17 -Wall -Wextra -O2 -municode -MMD -MP
-LDFLAGS = -lws2_32 -ldnsapi -ld3d11 -ld3dcompiler -ldxva2 -lmfplat -lmfuuid -lstrmiids -lgdi32 -lole32 -liphlpapi
+# Static-link the MinGW runtimes (libgcc/libstdc++/winpthread) so the exe
+# runs on machines without a MinGW installation
+LDFLAGS = -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lwinpthread -Wl,-Bdynamic \
+          -lws2_32 -ldnsapi -ld3d11 -ld3dcompiler -ldxva2 -lmfplat -lmfuuid -lstrmiids -lgdi32 -lole32 -liphlpapi
 
 CXX_SRCS = src/main.cpp \
        src/mdns_sd.cpp \
