@@ -13,8 +13,9 @@ endif()
 # It is built with only the native AAC decoder, which is LGPL-compatible.
 set(FFMPEG_DIR "${CMAKE_SOURCE_DIR}/thirdparty/ffmpeg" CACHE PATH "FFmpeg source/build directory")
 set(FFMPEG_VER "7.1.1" CACHE STRING "FFmpeg version")
-set(FFMPEG_TAR "${CMAKE_SOURCE_DIR}/thirdparty/ffmpeg-${FFMPEG_VER}.tar.xz")
-set(FFMPEG_URL "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VER}.tar.xz")
+set(FFMPEG_TAR "${CMAKE_SOURCE_DIR}/thirdparty/FFmpeg-n${FFMPEG_VER}.tar.gz")
+# Use the GitHub auto-generated source archive for better CI/ISP reachability.
+set(FFMPEG_URL "https://github.com/FFmpeg/FFmpeg/archive/refs/tags/n${FFMPEG_VER}.tar.gz")
 
 if(NOT EXISTS "${FFMPEG_DIR}/libavcodec/libavcodec.a" OR NOT EXISTS "${FFMPEG_DIR}/libavutil/libavutil.a")
     if(NOT EXISTS "${FFMPEG_TAR}")
@@ -24,10 +25,10 @@ if(NOT EXISTS "${FFMPEG_DIR}/libavcodec/libavcodec.a" OR NOT EXISTS "${FFMPEG_DI
     if(NOT EXISTS "${FFMPEG_DIR}")
         message(STATUS "Extracting FFmpeg...")
         file(MAKE_DIRECTORY "${CMAKE_SOURCE_DIR}/thirdparty")
-        execute_process(COMMAND ${CMAKE_COMMAND} -E tar xJf ${FFMPEG_TAR}
+        execute_process(COMMAND ${CMAKE_COMMAND} -E tar xzf ${FFMPEG_TAR}
                         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/thirdparty"
                         COMMAND_ERROR_IS_FATAL ANY)
-        file(RENAME "${CMAKE_SOURCE_DIR}/thirdparty/ffmpeg-${FFMPEG_VER}" ${FFMPEG_DIR})
+        file(RENAME "${CMAKE_SOURCE_DIR}/thirdparty/FFmpeg-n${FFMPEG_VER}" ${FFMPEG_DIR})
     endif()
 
     find_program(BASH bash)

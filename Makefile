@@ -12,8 +12,9 @@ LDFLAGS = -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lwinpthread -W
 # (FFmpeg's native AAC decoder is LGPL).
 FFMPEG_VER = 7.1.1
 FFMPEG_DIR = thirdparty/ffmpeg
-FFMPEG_TAR = thirdparty/ffmpeg-$(FFMPEG_VER).tar.xz
-FFMPEG_URL = https://ffmpeg.org/releases/ffmpeg-$(FFMPEG_VER).tar.xz
+FFMPEG_TAR = thirdparty/FFmpeg-n$(FFMPEG_VER).tar.gz
+# Use the GitHub auto-generated source archive for better CI/ISP reachability.
+FFMPEG_URL = https://github.com/FFmpeg/FFmpeg/archive/refs/tags/n$(FFMPEG_VER).tar.gz
 
 FFMPEG_CONF = \
     --disable-all \
@@ -73,9 +74,9 @@ $(FFMPEG_TAR):
 	curl -L -o $@ $(FFMPEG_URL)
 
 $(FFMPEG_STAMP): $(FFMPEG_TAR)
-	@rm -rf $(FFMPEG_DIR) thirdparty/ffmpeg-$(FFMPEG_VER)
-	tar -xJf $< -C thirdparty
-	mv thirdparty/ffmpeg-$(FFMPEG_VER) $(FFMPEG_DIR)
+	@rm -rf $(FFMPEG_DIR) thirdparty/FFmpeg-n$(FFMPEG_VER)
+	tar -xzf $< -C thirdparty
+	mv thirdparty/FFmpeg-n$(FFMPEG_VER) $(FFMPEG_DIR)
 	cd $(FFMPEG_DIR) && ./configure $(FFMPEG_CONF)
 	$(MAKE) -C $(FFMPEG_DIR) -j4
 	@touch $@
@@ -111,7 +112,7 @@ DEPS = $(OBJS:.o=.d) $(TEST_OBJS:.o=.d)
 
 clean:
 	rm -f $(OBJS) $(TARGET) test/test_all.o test/test_all.exe $(DEPS)
-	rm -rf thirdparty/ffmpeg thirdparty/ffmpeg-*.tar.xz
+	rm -rf thirdparty/ffmpeg thirdparty/FFmpeg-*.tar.gz
 
 -include $(DEPS)
 
