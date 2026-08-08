@@ -9,6 +9,8 @@
   * 言語: C / C++ (C11 / C++17)
   * レンダリング・デコード API: Direct3D 11 / DXVA2 / Windows Media Foundation (DirectX Hardware Acceleration)
   * ネットワーク: WinSock2 / Windows DNS Service Discovery (mDNS / Bonjour)
+  * 音声デコード: vendored Fraunhofer FDK AAC
+  * 音声出力: WASAPI 共有モード
   * ベース参考実装: UxPlay / RPiPlay 等のオープンソースAirPlayレシーバーアーキテクチャ
 
 ---
@@ -38,9 +40,12 @@
   * 30fps / 60fps の上限固定機能（コマンドライン引数または設定ファイル指定）。
   * ドロップフレーム処理による遅延・バッファ蓄積の防止。
 
-### 2.4. 音声処理の無効化・最小化
-* **サブディスプレイ特化仕様**:
-  * 音声ストリーム (AAC / ALAC) のデコード処理を無効化（スルーまたは無視）し、CPUリソースの消費を回避。
+### 2.4. 音声処理
+* **AirPlay ミラーリング音声の受信・再生**:
+  * ストリームタイプ 96 (AAC-ELD / 44.1 kHz ステレオ) を RTP/UDP で受信。
+  * AES-128-CBC で復号（パケットごとに IV リセット、末尾の部分ブロックは平文）。
+  * vendored Fraunhofer FDK AAC で AAC-ELD を 44.1 kHz s16 ステレオ PCM にデコード。
+  * WASAPI 共有モードでスピーカー出力し、Mac 側の AirPlay 音量 (`SET_PARAMETER volume`) を反映。
 
 ### 2.5. ミニマル GUI / CLI 画面
 * **ウィンドウ表示**:
@@ -68,14 +73,15 @@
 * **低遅延（Low Latency）**:
   * 受信から画面描画までのレイテンシを約 50〜100ms 以下に抑えるジッターバッファ制御。
 * **ビルド & 依存関係の最小化**:
-  * 重いサードパーティUIライブラリ（Electron, Qt等）を一切排除し、Win32 API Native + Direct3D のみで軽量ビルドを実現。
+  * 重いサードパーティ UI ライブラリ（Electron, Qt 等）を一切排除し、Win32 API Native + Direct3D + WASAPI + vendored FDK AAC で軽量ビルドを実現。
 
 ---
 
 ## 4. 今後の開発ロードマップ
 
-1. **フェーズ 1**: 要件定義・仕様のフィナライズと設計文書の整理（現在）
+1. **フェーズ 1**: 要件定義・仕様のフィナライズと設計文書の整理
 2. **フェーズ 2**: mDNS アナウンス & RTSP ハンドシェイクのモック作成
 3. **フェーズ 3**: H.264 ストリーム受信 & DXVA2/D3D11 デコードパイプラインの実装
 4. **フェーズ 4**: 解像度・FPS制御 & ウィンドウ/全画面化
-5. **フェーズ 5**: パフォーマンスチューニング (Atom実機検証・メモリ最適化)
+5. **フェーズ 5**: AirPlay ミラーリング音声 (AAC-ELD) の受信・復号・WASAPI 再生
+6. **フェーズ 6**: パフォーマンスチューニング (Atom 実機検証・メモリ最適化)

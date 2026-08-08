@@ -21,9 +21,14 @@
 
 #include "../src/sha512.h"
 #include "../src/aes_ctr.h"
+#include "../src/aes_cbc.h"
 #include "../src/bplist.h"
 #include "../src/renderer_d3d11.h"
 #include "../src/decoder_d3d11.h"
+#include "../src/audio_wasapi.h"
+
+#include <cmath>
+#include <aacdecoder_lib.h>
 
 extern "C" {
 #include "../src/playfair/playfair.h"
@@ -164,6 +169,54 @@ static void TestAesCtr() {
         aes2.Init(key, iv);
         for (int i = 0; i < 64; ++i) aes2.Process(plain + i, cipher + i, 1);
         CHECK(ToHex(cipher, 64) == expected, "SP800-38A F.5.1 4 blocks (byte-wise)");
+    }
+}
+
+static void TestAesCbc() {
+    std::cout << "[AES-128-CBC decrypt]" << std::endl;
+    // NIST SP 800-38A F.2.1 CBC-AES128 decrypt
+    uint8_t key[16] = {0x2B,0x7E,0x15,0x16,0x28,0xAE,0xD2,0xA6,0xAB,0xF7,0x15,0x88,0x09,0xCF,0x4F,0x3C};
+    uint8_t iv[16]  = {0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,0x09,0x0A,0x0B,0x0C,0x0D,0x0E,0x0F};
+    uint8_t cipher[64] = {
+        0x76,0x49,0xAB,0xAC,0x81,0x19,0xB2,0x46,0xCE,0xE9,0x8E,0x9B,0x12,0xE9,0x19,0x7D,
+        0x50,0x86,0xCB,0x9B,0x50,0x72,0x19,0xEE,0x95,0xDB,0x11,0x3A,0x91,0x76,0x78,0xB2,
+        0x73,0xBE,0xD6,0xB8,0xE3,0xC1,0x74,0x3B,0x71,0x16,0xE6,0x9E,0x22,0x22,0x95,0x16,
+        0x3F,0xF1,0xCA,0xA1,0x68,0x1F,0xAC,0x09,0x12,0x0E,0xCA,0x30,0x75,0x86,0xE1,0xA7
+    };
+    const char* expected =
+        "6bc1bee22e409f96e93d7e117393172a"
+        "ae2d8a571e03ac9c9eb76fac45af8e51"
+        "30c81c46a35ce411e5fbc1191a0a52ef"
+        "f69f2445df4f9b17ad2b417be66c3710";
+
+    uint8_t plain[64];
+    AesCbc aes;
+    aes.InitDecrypt(key, iv);
+    aes.DecryptPacket(cipher, plain, 64);
+    CHECK(ToHex(plain, 64) == expected, "SP800-38A F.2.1 CBC decrypt (4 blocks)");
+
+    // AirPlay shape: partial tail is plaintext (2 blocks + 8 raw tail bytes)
+    uint8_t mixed[72];
+    memcpy(mixed, cipher, 64);
+    for (int i = 0; i < 8; ++i) mixed[64 + i] = (uint8_t)(0xA0 + i);
+    uint8_t out[72];
+    aes.DecryptPacket(mixed, out, 72);
+    bool ok = ToHex(out, 64) == expected;
+    for (int i = 0; i < 8; ++i) ok = ok && (out[64 + i] == (uint8_t)(0xA0 + i));
+    CHECK(ok, "CBC partial-tail passthrough (per-packet IV reset)");
+
+    // EncryptPacket round-trip (used by the e2e audio path)
+    {
+        uint8_t msg[72];
+        for (int i = 0; i < 72; ++i) msg[i] = (uint8_t)(i * 5 + 1);
+        uint8_t enc[72], dec[72];
+        AesCbc a;
+        a.InitEncrypt(key, iv);
+        a.EncryptPacket(msg, enc, 72);
+        AesCbc b;
+        b.InitDecrypt(key, iv);
+        b.DecryptPacket(enc, dec, 72);
+        CHECK(memcmp(msg, dec, 72) == 0, "CBC encrypt/decrypt round-trip");
     }
 }
 
@@ -455,6 +508,83 @@ static void PutLE32(uint8_t* p, uint32_t v) { memcpy(p, &v, 4); }
 static void PutLE64(uint8_t* p, uint64_t v) { memcpy(p, &v, 8); }
 static void PutLEFloat(uint8_t* p, float f) { memcpy(p, &f, 4); }
 
+// ---------- audio tests ----------
+
+// Decode AAC-LC frames (ADTS file) through the vendored FDK decoder.
+// (Exercises the same fdk open/config/fill/decode mechanics the ELD path uses.)
+static int TestAacDecode(const char* path) {
+    std::vector<uint8_t> adts = ReadFileBytes(path);
+    if (adts.empty()) { std::cerr << "cannot read " << path << std::endl; return 1; }
+
+    HANDLE_AACDECODER dec = aacDecoder_Open(TT_MP4_RAW, 1);
+    CHECK(dec != nullptr, "fdk aacDecoder_Open");
+    uint8_t ascLC[2] = { 0x12, 0x10 }; // AAC-LC 44100 stereo
+    UCHAR* conf[] = { ascLC };
+    UINT confLen[] = { 2 };
+    CHECK(aacDecoder_ConfigRaw(dec, conf, confLen) == AAC_DEC_OK, "fdk ConfigRaw (LC)");
+
+    // Split ADTS frames
+    int frames = 0, okFrames = 0;
+    long long totalSamples = 0;
+    double energy = 0;
+    size_t pos = 0;
+    std::vector<int16_t> pcm;
+    while (pos + 7 <= adts.size()) {
+        if (adts[pos] != 0xFF || (adts[pos + 1] & 0xF0) != 0xF0) { pos++; continue; }
+        size_t frameLen = ((adts[pos + 3] & 0x3) << 11) | (adts[pos + 4] << 3) | ((adts[pos + 5] & 0xE0) >> 5);
+        if (frameLen < 7 || pos + frameLen > adts.size()) break;
+        const uint8_t* raw = adts.data() + pos + 7; // strip 7-byte ADTS header
+        size_t rawLen = frameLen - 7;
+
+        uint8_t* inBuf[] = { const_cast<uint8_t*>(raw) };
+        UINT inLen[] = { (UINT)rawLen };
+        UINT valid = (UINT)rawLen;
+        if (aacDecoder_Fill(dec, inBuf, inLen, &valid) == AAC_DEC_OK) {
+            pcm.resize(4096);
+            if (aacDecoder_DecodeFrame(dec, pcm.data(), (UINT)pcm.size(), 0) == AAC_DEC_OK) {
+                const CStreamInfo* info = aacDecoder_GetStreamInfo(dec);
+                okFrames++;
+                totalSamples += info->frameSize;
+                for (int i = 0; i < info->frameSize * info->numChannels; ++i) {
+                    double s = pcm[i] / 32768.0;
+                    energy += s * s;
+                }
+            }
+        }
+        frames++;
+        pos += frameLen;
+    }
+    std::cout << "[AudioDec] adts frames=" << frames << " decoded=" << okFrames
+              << " samples=" << totalSamples << std::endl;
+    CHECK(frames > 80, "parsed >80 ADTS frames (2s @1024)");
+    CHECK(okFrames > 80, "decoded >80 frames");
+    CHECK(energy > 1.0, "PCM is non-silent (sine wave energy)");
+    aacDecoder_Close(dec);
+    return 0;
+}
+
+// WASAPI smoke test: push 0.5s of 440 Hz sine through the player
+static int TestWasapi() {
+    WasapiPlayer player;
+    if (!player.Start()) { CHECK(false, "WasapiPlayer.Start"); return 1; }
+
+    const int frames = 480; // one ELD-like frame
+    std::vector<int16_t> pcm(frames * 2);
+    for (int n = 0; n < 50; ++n) { // ~0.5s of sine
+        for (int i = 0; i < frames; ++i) {
+            double t = (n * frames + i) / 44100.0;
+            int16_t v = (int16_t)(sin(2 * 3.14159265 * 440 * t) * 8000);
+            pcm[i * 2] = v; pcm[i * 2 + 1] = v;
+        }
+        player.PushPcm(pcm.data(), frames);
+        Sleep(5);
+    }
+    Sleep(700); // let the render thread drain
+    player.Stop();
+    CHECK(true, "WASAPI render ran without errors (440Hz tone should have played)");
+    return 0;
+}
+
 static int TestE2E(const char* host, const char* path) {
     std::vector<uint8_t> stream = ReadFileBytes(path);
     if (stream.empty()) { std::cerr << "cannot read " << path << std::endl; return 1; }
@@ -503,7 +633,7 @@ static int TestE2E(const char* host, const char* path) {
             const BPNode* displays = info.Find("displays");
             CHECK(displays && displays->type == BPNode::Type::Array && !displays->array.empty(), "displays present");
             if (displays && !displays->array.empty()) {
-                CHECK(displays->array[0].FindInt("widthPixels") == 1280, "display width 1280");
+                CHECK(displays->array[0].FindInt("widthPixels") == 1920, "display width 1920 (1080p default)");
                 CHECK(displays->array[0].FindInt("maxFPS") == 30, "maxFPS 30");
             }
         }
@@ -681,6 +811,7 @@ static int TestE2E(const char* host, const char* path) {
     uint64_t ts = spsTs; // first encrypted packet must share the SPS/PPS timestamp
     int sentPackets = 0;
     bool audioSetupDone = false;
+    uint16_t audioDataPort = 0;
     for (const auto& nal : nals) {
         int type = nal[0] & 0x1F;
         if (type == 7 || type == 8) continue; // already sent via parameter packet
@@ -727,9 +858,10 @@ static int TestE2E(const char* host, const char* path) {
                 BPNode r;
                 if (BPlistParse(aresp.body.data(), aresp.body.size(), r)) {
                     const BPNode* rs = r.Find("streams");
-                    CHECK(rs && rs->type == BPNode::Type::Array && !rs->array.empty() &&
-                          rs->array[0].FindInt("dataPort", 0) != 0,
-                          "audio stream response carries dataPort");
+                    bool okPort = rs && rs->type == BPNode::Type::Array && !rs->array.empty() &&
+                                  rs->array[0].FindInt("dataPort", 0) != 0;
+                    CHECK(okPort, "audio stream response carries dataPort");
+                    if (okPort) audioDataPort = (uint16_t)rs->array[0].FindInt("dataPort", 0);
                 }
             }
         }
@@ -737,6 +869,41 @@ static int TestE2E(const char* host, const char* path) {
     std::cout << "[E2E] streamed " << sentPackets << " encrypted video packets" << std::endl;
     CHECK(sentPackets > 40, "streamed the video");
     CHECK(audioSetupDone, "audio SETUP was exercised mid-stream");
+
+    // Audio RTP path: send encrypted (fake) AAC-ELD frames to the audio port.
+    // The server decrypts and validates them (decode of garbage fails gracefully).
+    if (audioDataPort) {
+        SOCKET as = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+        sockaddr_in aaddr = {};
+        aaddr.sin_family = AF_INET;
+        aaddr.sin_port = htons(audioDataPort);
+        inet_pton(AF_INET, host, &aaddr.sin_addr);
+
+        AesCbc aenc;
+        aenc.InitEncrypt(audioKey, eiv.data());
+        bool sent = true;
+        for (uint16_t seq = 0; seq < 12 && sent; ++seq) {
+            // fake ELD frame: 0x8c marker + 96 bytes payload
+            std::vector<uint8_t> frame(97);
+            frame[0] = 0x8c;
+            for (size_t i = 1; i < frame.size(); ++i) frame[i] = (uint8_t)(i * 7 + seq);
+            std::vector<uint8_t> enc(frame.size());
+            aenc.EncryptPacket(frame.data(), enc.data(), frame.size());
+
+            std::vector<uint8_t> pkt;
+            pkt.push_back(0x80); pkt.push_back(0x60);
+            pkt.push_back((uint8_t)(seq >> 8)); pkt.push_back((uint8_t)(seq & 0xFF));
+            PutBE32(pkt, 1000 + seq * 480);          // rtp timestamp
+            PutBE32(pkt, 0x12345678);                // ssrc
+            pkt.insert(pkt.end(), enc.begin(), enc.end());
+            sent = sendto(as, (const char*)pkt.data(), (int)pkt.size(), 0,
+                          (struct sockaddr*)&aaddr, sizeof(aaddr)) == (int)pkt.size();
+        }
+        CHECK(sent, "audio RTP packets sent");
+        closesocket(as);
+    } else {
+        CHECK(false, "audio dataPort available for audio RTP test");
+    }
 
     // Partial TEARDOWN of the audio stream only: the video session and the
     // RTSP connection must survive (regression: this used to kill the session)
@@ -815,13 +982,18 @@ int main(int argc, char** argv) {
     if (mode == "unit") {
         TestSha512();
         TestAesCtr();
+        TestAesCbc();
         TestBplist();
     } else if (mode == "decode" && argc > 2) {
         TestDecode(argv[2]);
+    } else if (mode == "adec" && argc > 2) {
+        TestAacDecode(argv[2]);
+    } else if (mode == "wasapi") {
+        TestWasapi();
     } else if (mode == "e2e" && argc > 3) {
         TestE2E(argv[2], argv[3]);
     } else {
-        std::cerr << "usage: test_all.exe unit | decode <file.h264> | e2e <host> <file.h264>" << std::endl;
+        std::cerr << "usage: test_all.exe unit | decode <file.h264> | adec <file.aac> | wasapi | e2e <host> <file.h264>" << std::endl;
         return 2;
     }
 

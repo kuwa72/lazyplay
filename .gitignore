@@ -8,3 +8,7 @@
 # VS Code / IDE
 .vscode/
 .idea/
+
+# Local test fixtures / probes
+/test/test.aac
+/test/probe_aac.cpp

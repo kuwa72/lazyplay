@@ -40,7 +40,8 @@ jobs:
         shell: pwsh
         run: |
           strip lazyplay.exe
-          Compress-Archive -Path lazyplay.exe, README.md, LICENSE -DestinationPath lazyplay-win-x64.zip
+          Copy-Item src/fdk-aac/NOTICE NOTICE-FDK-AAC -Force
+          Compress-Archive -Path lazyplay.exe, README.md, LICENSE, NOTICE-FDK-AAC -DestinationPath lazyplay-win-x64.zip
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

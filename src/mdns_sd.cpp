@@ -56,7 +56,7 @@ std::vector<uint8_t> BuildRaopTxt(const AirPlayAdvertiseInfo& info) {
 
     std::vector<uint8_t> txt;
     AppendTxtPair(txt, "ch", "2");
-    AppendTxtPair(txt, "cn", "0,1,2,3");
+    AppendTxtPair(txt, "cn", "0,1"); // PCM + ALAC only (no AAC: MF can't decode AAC-ELD)
     AppendTxtPair(txt, "da", "true");
     AppendTxtPair(txt, "et", "0,3,5");
     AppendTxtPair(txt, "vv", "2");

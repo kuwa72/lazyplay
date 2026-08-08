@@ -18,9 +18,13 @@ set(SOURCES
     src/renderer_d3d11.cpp
     src/sha512.cpp
     src/aes_ctr.cpp
+    src/aes_cbc.cpp
     src/fairplay.cpp
     src/bplist.cpp
     src/video_stream.cpp
+    src/audio_stream.cpp
+    src/audio_decoder.cpp
+    src/audio_wasapi.cpp
     src/ntp_timing.cpp
 )
 
@@ -33,7 +37,24 @@ set(PLAYFAIR_SOURCES
     src/playfair/sap_hash.c
 )
 
-add_executable(lazyplay ${SOURCES} ${PLAYFAIR_SOURCES})
+# Vendored Fraunhofer FDK AAC decoder (decoder libs only)
+file(GLOB FDK_AAC_DIRS "src/fdk-aac/*")
+set(FDK_AAC_SOURCES "")
+foreach(dir ${FDK_AAC_DIRS})
+    if(IS_DIRECTORY ${dir})
+        file(GLOB lib_srcs "${dir}/src/*.cpp")
+        list(APPEND FDK_AAC_SOURCES ${lib_srcs})
+    endif()
+endforeach()
+
+add_executable(lazyplay ${SOURCES} ${PLAYFAIR_SOURCES} ${FDK_AAC_SOURCES})
+
+# fdk-aac headers live in each library's include/ and src/ directories
+foreach(dir ${FDK_AAC_DIRS})
+    if(IS_DIRECTORY ${dir})
+        target_include_directories(lazyplay PRIVATE "${dir}/include" "${dir}/src")
+    endif()
+endforeach()
 
 # Windows System Libraries
 target_link_libraries(lazyplay PRIVATE

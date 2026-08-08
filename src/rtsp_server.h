@@ -14,6 +14,7 @@
 #include "airplay_advertise.h"
 #include "fairplay.h"
 #include "video_stream.h"
+#include "audio_stream.h"
 #include "ntp_timing.h"
 
 struct AirPlayServerConfig {
@@ -56,10 +57,11 @@ private:
         FairPlay fairplay;
         bool fpReady = false;
         uint8_t audioAesKey[16] = {};
+        uint8_t audioAesIv[16] = {};
         bool hasAudioKey = false;
         std::unique_ptr<MirrorVideoServer> video;
         std::unique_ptr<NtpTimingClient> ntp;
-        SOCKET audioSink = INVALID_SOCKET; // bound UDP port that discards audio
+        std::unique_ptr<AudioReceiver> audio; // AAC-ELD decode + playback
     };
 
     void ServerLoop();

@@ -1,14 +1,16 @@
 # lazyplay — project notes for agents
 
-Lightweight AirPlay mirroring receiver for Windows (Win32 + D3D11 + Media Foundation, no external deps beyond vendored playfair).
+Lightweight AirPlay mirroring receiver for Windows (Win32 + D3D11 + Media Foundation + WASAPI, no external deps beyond vendored playfair and fdk-aac).
 
 ## Build & test
 
 - `make` — builds `lazyplay.exe` (MinGW g++/gcc; MSVC via CMakeLists.txt)
-- `make test` then `./test/test_all.exe unit` — crypto/bplist unit tests
+- `make test` then `./test/test_all.exe unit` — crypto / bplist / AES-CBC / FDK AAC / WASAPI unit tests
 - `./test/test_all.exe decode test/test.h264` — MFT decode + NV12 render readback test
+- `./test/test_all.exe adec test/test.aac` — FDK AAC ADTS decode test (optional fixture)
+- `./test/test_all.exe wasapi` — 440 Hz sine playback smoke test (listen for tone)
 - `./test/test_all.exe e2e <host> test/test.h264` — full AirPlay handshake + encrypted streaming against a running `./lazyplay.exe`
-- Regenerate the fixture: `ffmpeg -y -f lavfi -i testsrc=size=1280x720:rate=30 -t 2 -c:v libx264 -profile:v baseline -bf 0 -g 30 -pix_fmt nv12 -f h264 test/test.h264`
+- Regenerate the video fixture: `ffmpeg -y -f lavfi -i testsrc=size=1280x720:rate=30 -t 2 -c:v libx264 -profile:v baseline -bf 0 -g 30 -pix_fmt nv12 -f h264 test/test.h264`
 
 ## Architecture / protocol (UxPlay-compatible)
 
@@ -20,9 +22,11 @@ Lightweight AirPlay mirroring receiver for Windows (Win32 + D3D11 + Media Founda
 - `ntp_timing.cpp` — timingProtocol=NTP: sends 32-byte requests to the client timing port every 3 s.
 - `decoder_d3d11.cpp` — MS H.264 MFT, low-latency mode, D3D11 NV12 texture output (no software fallback by design, REQUIREMENTS 2.2).
 - `renderer_d3d11.cpp` — NV12→RGB (BT.601 limited) pixel shader, aspect-preserved letterbox, Alt+Enter fullscreen, Esc/Q quit.
+- `audio_stream.cpp` — RTP/UDP type-96 receiver: AES-128-CBC per-packet decrypt (per-packet IV reset, partial tail passthrough), duplicate elimination, jitter buffer, fdk-aac AAC-ELD decode → 44.1 kHz s16 stereo PCM.
+- `audio_decoder.cpp` + `src/fdk-aac/` — Fraunhofer FDK AAC decoder wrapper for AAC-ELD.
+- `audio_wasapi.cpp` — WASAPI shared-mode render thread, resampling to the mix format and volume dB → linear gain.
 
 ## Constraints / non-goals
 
-- Audio (RAOP type-96 streams) is accepted and discarded (sub-display specialization).
 - Pairing (SRP/Ed25519) intentionally not implemented; keep feature bit 27 cleared.
 - H.265 requires feature bit 42 + HEVC decoder — not implemented.

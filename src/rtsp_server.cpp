@@ -4,6 +4,8 @@
 #include <sstream>
 #include <algorithm>
 #include <cctype>
+#include <cmath>
+#include <cstdlib>
 
 #include "bplist.h"
 #include "sha512.h"
@@ -194,17 +196,6 @@ bool RTSPServer::ReadRequest(SOCKET sock, std::vector<uint8_t>& buffer, Request&
 
 void RTSPServer::HandleClient(SOCKET clientSock, std::string clientIp) {
     Session session;
-    {
-        // Bound UDP sink so audio stream setup gets a real port; data is discarded
-        session.audioSink = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-        if (session.audioSink != INVALID_SOCKET) {
-            sockaddr_in addr = {};
-            addr.sin_family = AF_INET;
-            addr.sin_addr.s_addr = INADDR_ANY;
-            addr.sin_port = 0;
-            bind(session.audioSink, (struct sockaddr*)&addr, sizeof(addr));
-        }
-    }
 
     std::vector<uint8_t> buffer;
     while (m_running) {
@@ -219,7 +210,7 @@ void RTSPServer::HandleClient(SOCKET clientSock, std::string clientIp) {
     // Connection closed without (full) TEARDOWN: release session resources
     if (session.video) session.video->Stop();
     if (session.ntp) session.ntp->Stop();
-    if (session.audioSink != INVALID_SOCKET) closesocket(session.audioSink);
+    if (session.audio) session.audio->Stop();
     closesocket(clientSock);
     std::cout << "[RTSP] Connection from " << clientIp << " closed." << std::endl;
 }
@@ -309,8 +300,10 @@ void RTSPServer::HandleInfo(SOCKET sock, const Request& req) {
     for (uint64_t type : {100, 101}) {
         BPNode fmt = BPNode::MakeDict();
         fmt.Set("type", BPNode::MakeInt(type));
-        fmt.Set("audioInputFormats", BPNode::MakeInt(0x3fffffc));
-        fmt.Set("audioOutputFormats", BPNode::MakeInt(0x3fffffc));
+        // Advertise ALAC only (0x40000): macOS mirror audio defaults to AAC-ELD,
+        // which Windows Media Foundation cannot decode
+        fmt.Set("audioInputFormats", BPNode::MakeInt(0x40000));
+        fmt.Set("audioOutputFormats", BPNode::MakeInt(0x40000));
         audioFormats.Append(fmt);
     }
     root.Set("audioFormats", audioFormats);
@@ -373,6 +366,7 @@ void RTSPServer::HandleSetup(SOCKET sock, const Request& req, const std::string&
             std::cerr << "[RTSP] SETUP arrived before fp-setup; FairPlay session missing." << std::endl;
         }
         if (session.fairplay.Decrypt(ekey->data.data(), session.audioAesKey) == 0) {
+            memcpy(session.audioAesIv, eiv->data.data(), 16);
             session.hasAudioKey = true;
             std::cout << "[RTSP] FairPlay ekey decrypted (audio AES key obtained)." << std::endl;
         } else {
@@ -438,31 +432,35 @@ void RTSPServer::HandleSetup(SOCKET sock, const Request& req, const std::string&
                 resStream.Set("type", BPNode::MakeInt(110));
                 resStreams.Append(resStream);
             } else if (type == 96) {
-                // Audio stream: accepted but discarded (sub-display specialization, REQUIREMENTS 2.4)
-                if (session.audioSink == INVALID_SOCKET) {
-                    // (Re)create the sink: audio can be torn down and re-added mid-session
-                    session.audioSink = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-                    if (session.audioSink != INVALID_SOCKET) {
-                        sockaddr_in addr = {};
-                        addr.sin_family = AF_INET;
-                        addr.sin_addr.s_addr = INADDR_ANY;
-                        addr.sin_port = 0;
-                        bind(session.audioSink, (struct sockaddr*)&addr, sizeof(addr));
-                    }
-                }
+                // Audio stream: AAC-ELD decode + WASAPI playback
+                uint64_t ct = stream.FindInt("ct", 0);
+                uint64_t spf = stream.FindInt("spf", 0);
+                uint64_t audioFormat = stream.FindInt("audioFormat", 0);
+
                 uint16_t audioPort = 0;
-                if (session.audioSink != INVALID_SOCKET) {
-                    sockaddr_in bound = {};
-                    int boundLen = sizeof(bound);
-                    getsockname(session.audioSink, (struct sockaddr*)&bound, &boundLen);
-                    audioPort = ntohs(bound.sin_port);
+                if (ct == 8 && session.hasAudioKey) {
+                    if (!session.audio) {
+                        session.audio.reset(new AudioReceiver());
+                        if (!session.audio->Start(0, session.audioAesKey, session.audioAesIv)) {
+                            std::cerr << "[RTSP] Failed to start audio receiver." << std::endl;
+                            session.audio.reset();
+                        }
+                    }
+                    if (session.audio) audioPort = session.audio->GetPort();
+                } else {
+                    std::cerr << "[RTSP] Audio stream with unsupported ct=" << ct << " ignored." << std::endl;
                 }
+
                 BPNode resStream = BPNode::MakeDict();
                 resStream.Set("dataPort", BPNode::MakeInt(audioPort));
                 resStream.Set("controlPort", BPNode::MakeInt(audioPort));
                 resStream.Set("type", BPNode::MakeInt(96));
                 resStreams.Append(resStream);
-                std::cout << "[RTSP] Audio stream setup: accepted (discarding audio)." << std::endl;
+
+                std::cout << "[RTSP] Audio stream setup: ct=" << ct << " spf=" << spf
+                          << " audioFormat=0x" << std::hex << audioFormat << std::dec
+                          << (ct == 2 ? " (ALAC)" : ct == 8 ? " (AAC-ELD)" : "")
+                          << ", port " << audioPort << std::endl;
             } else {
                 std::cerr << "[RTSP] Unknown stream type " << type << " requested." << std::endl;
             }
@@ -490,6 +488,10 @@ void RTSPServer::HandleTeardown(SOCKET sock, const Request& req, Session& sessio
                         session.video.reset();
                         std::cout << "[RTSP] Mirroring stream torn down." << std::endl;
                     } else if (type == 96) {
+                        if (session.audio) {
+                            session.audio->Stop();
+                            session.audio.reset();
+                        }
                         std::cout << "[RTSP] Audio stream torn down (video session continues)." << std::endl;
                     }
                 }
@@ -501,7 +503,7 @@ void RTSPServer::HandleTeardown(SOCKET sock, const Request& req, Session& sessio
         // Full session teardown: release everything; the client closes the connection.
         if (session.video) { session.video->Stop(); session.video.reset(); }
         if (session.ntp) { session.ntp->Stop(); session.ntp.reset(); }
-        if (session.audioSink != INVALID_SOCKET) { closesocket(session.audioSink); session.audioSink = INVALID_SOCKET; }
+        if (session.audio) { session.audio->Stop(); session.audio.reset(); }
         std::cout << "[RTSP] Session torn down." << std::endl;
         SendEmptyOk(sock, req, { { "Connection", "close" } });
         closeAfter = true;
@@ -548,6 +550,23 @@ void RTSPServer::ProcessRequest(SOCKET clientSock, const Request& req, const std
             SendEmptyOk(clientSock, req);
         }
     } else if (req.method == "SET_PARAMETER") {
+        // "volume: <dB>" (text/parameters) adjusts the mirrored audio playback volume
+        const std::string* contentType = req.Header("Content-Type");
+        bool isVolType = contentType && (contentType->find("text/parameters") != std::string::npos);
+        if (isVolType && !req.body.empty() && session.audio) {
+            std::string body((const char*)req.body.data(), req.body.size());
+            size_t vpos = body.find("volume:");
+            if (vpos != std::string::npos) {
+                float v = strtof(body.c_str() + vpos + 7, nullptr);
+                // AirPlay volume is usually dB (-30..0, -144=mute), but some
+                // clients send a 0..1 linear multiplier; handle both.
+                if (v > 0.0f && v <= 1.0f) {
+                    session.audio->SetVolumeDb(20.0f * static_cast<float>(std::log10(v)));
+                } else {
+                    session.audio->SetVolumeDb(v);
+                }
+            }
+        }
         SendEmptyOk(clientSock, req);
     } else if (req.method == "POST" && req.url.find("/feedback") != std::string::npos) {
         // Periodic keep-alive stats from the client; acknowledge silently

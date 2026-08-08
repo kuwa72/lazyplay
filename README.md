@@ -9,9 +9,9 @@ Mac の AirPlay ミラーリング機能を使い、低スペックな Windows �
 
 - **GPU ハードウェアデコード (DXVA2/D3D11)**: H.264 を CPU ではなく GPU でデコード。
   ソフトウェアデコードへのフォールバックは意図的に持たない設計です
-- **Win32 + Direct3D11 ネイティブのみ**: Electron/Qt 等の重い依存なし。バイナリは約 700KB の単一 exe
+- **Win32 + Direct3D11 ネイティブのみ**: Electron/Qt 等の重い依存なし。単一 exe で持ち運び可能
 - **低遅延**: 受信→描画までを最小化（デコードしたフレームを即時 Present）
-- **音声は受け取って破棄**: サブディスプレイ用途に特化（要件上、音声デコードは行いません）
+- **音声も同時再生**: AirPlay ミラーリング音声（AAC-ELD / 44.1 kHz ステレオ）を復号し、WASAPI でスピーカー出力
 - **ペアリング不要**: feature bit 27 を切ってあるため、Mac 側での PIN 入力なしに接続できます
 
 ## 使い方
@@ -53,7 +53,7 @@ Windows 上の MinGW-w64 (gcc/g++) で:
 
 ```
 make            # lazyplay.exe
-make test       # ユニットテスト (SHA-512 / AES-CTR / bplist)
+make test       # ユニットテスト (SHA-512 / AES-CTR / AES-CBC / bplist / FDK AAC / WASAPI)
 ```
 
 統合テスト（実 H.264 ストリームのデコード＆描画検証 / プロトコル E2E）:
@@ -62,6 +62,13 @@ make test       # ユニットテスト (SHA-512 / AES-CTR / bplist)
 ./test/test_all.exe decode test/test.h264
 ./lazyplay.exe &                      # 別プロセスで起動
 ./test/test_all.exe e2e 127.0.0.1 test/test.h264
+```
+
+`test/test.aac`（ADTS 形式）があれば、AAC デコーダの検証もできます:
+
+```
+./test/test_all.exe adec test/test.aac
+./test/test_all.exe wasapi   # 440 Hz サイン波が鳴る簡易再生テスト
 ```
 
 MSVC の場合は `CMakeLists.txt` を使用してください。
@@ -78,8 +85,13 @@ MSVC の場合は `CMakeLists.txt` を使用してください。
   FairPlay SAP 鍵交換、AES-128-CTR 映像復号、NTP タイミング — プロトコルは
   [UxPlay](https://github.com/FDH2/UxPlay) / RPiPlay の実装を参照しています
 - FairPlay 部分は UxPlay 同梱の `playfair` を vendoring (`src/playfair/`)
+- 音声は RTP/UDP (stream type 96) を AES-128-CBC で復号し、
+  vendored Fraunhofer FDK AAC (`src/fdk-aac/`) で AAC-ELD を PCM にデコード、
+  WASAPI 共有モードで再生
 
 ## License
 
 GPLv3 — `playfair` (FairPlay SAP) を vendoring している関係上、本プロジェクト全体も GPLv3 で公開します。
 See [LICENSE](LICENSE).
+
+Fraunhofer FDK AAC デコーダは `src/fdk-aac/NOTICE` の条項の下で vendoring しています。
