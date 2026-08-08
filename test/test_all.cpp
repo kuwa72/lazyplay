@@ -342,6 +342,21 @@ static int TestDecode(const char* path) {
         std::cout << "[Decode] (skip resolution-switch test; fixture missing)" << std::endl;
     }
 
+    // 1080p (coded 1920x1088) — the target tablet's native resolution
+    std::vector<uint8_t> stream3 = ReadFileBytes("test/test_1920x1080.h264");
+    if (!stream3.empty()) {
+        auto nals3 = SplitNals(stream3);
+        int before = decodedFrames;
+        feedNals(nals3);
+        int produced3 = decodedFrames - before;
+        std::cout << "[Decode] 1080p: +" << produced3 << " frames" << std::endl;
+        CHECK(produced3 >= 25, "decoded >= 25 of 30 frames at 1080p");
+        uint32_t w3 = 0, h3 = 0;
+        renderer.GetVideoSize(w3, h3);
+        CHECK(w3 == 1920 && h3 == 1088, "1080p coded texture 1920x1088");
+        renderer.SetDisplayHint(1920, 1080); // as the client reports
+    }
+
     decoder.Shutdown();
     renderer.Cleanup();
     DestroyWindow(hwnd);
