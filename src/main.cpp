@@ -1,6 +1,8 @@
 #include <winsock2.h>
 #include <windows.h>
+#include <shellapi.h>
 #include <iostream>
+#include <sstream>
 #include <string>
 #include <vector>
 #include <algorithm>
@@ -25,6 +27,57 @@ std::string SanitizeHostLabel(const std::string& name) {
     }
     if (out.empty()) out = "lazyplay";
     return out;
+}
+
+// AirPlay needs inbound TCP 5000/7000 (+ mDNS UDP 5353). When the Windows
+// Firewall consent dialog is suppressed, first-time connections are silently
+// blocked; create the inbound allow rule ourselves (mirrors what the dialog
+// would have done). Runs once per machine; no-ops when a rule already exists.
+void EnsureFirewallRule() {
+    char exePath[MAX_PATH] = {};
+    GetModuleFileNameA(nullptr, exePath, MAX_PATH);
+    char shortPath[MAX_PATH] = {};
+    if (GetShortPathNameA(exePath, shortPath, MAX_PATH) > 0) {
+        strcpy_s(exePath, shortPath);
+    }
+
+    auto ruleExists = []() {
+        return system("netsh advfirewall firewall show rule name=\"lazyplay\" >nul 2>&1") == 0 ||
+               system("netsh advfirewall firewall show rule name=\"lazyplay.exe\" >nul 2>&1") == 0;
+    };
+    if (ruleExists()) return;
+
+    std::ostringstream netshArgs;
+    netshArgs << "advfirewall firewall add rule name=\"lazyplay\" dir=in action=allow program=\""
+              << exePath << "\" enable=yes profile=any";
+
+    // Try without elevation first (succeeds when running as administrator)
+    std::string silentCmd = "netsh " + netshArgs.str() + " >nul 2>&1";
+    if (system(silentCmd.c_str()) == 0 && ruleExists()) {
+        std::cout << "[Firewall] Added inbound allow rule for this executable." << std::endl;
+        return;
+    }
+
+    // Elevate once via UAC (the same permission the firewall dialog would request)
+    std::cout << "[Firewall] No inbound firewall rule; requesting permission once (UAC)..." << std::endl;
+    SHELLEXECUTEINFOA sei = {};
+    sei.cbSize = sizeof(sei);
+    sei.fMask = SEE_MASK_NOCLOSEPROCESS;
+    sei.lpVerb = "runas";
+    sei.lpFile = "netsh.exe";
+    sei.lpParameters = netshArgs.str().c_str();
+    sei.nShow = SW_HIDE;
+    if (ShellExecuteExA(&sei) && sei.hProcess) {
+        WaitForSingleObject(sei.hProcess, 15000);
+        CloseHandle(sei.hProcess);
+    }
+
+    if (ruleExists()) {
+        std::cout << "[Firewall] Inbound rule added; AirPlay clients can connect now." << std::endl;
+    } else {
+        std::cout << "[Firewall] Rule not added. If clients cannot connect, run once as administrator:" << std::endl;
+        std::cout << "  netsh " << netshArgs.str() << std::endl;
+    }
 }
 
 } // namespace
@@ -92,6 +145,8 @@ int main(int argc, char* argv[]) {
     std::cout << "  Device Name: " << deviceName << std::endl;
     std::cout << "  Target Resolution: " << width << "x" << height << " @" << targetFps << "fps" << std::endl;
     std::cout << "==========================================" << std::endl;
+
+    EnsureFirewallRule();
 
     // Register Win32 Window Class
     const wchar_t CLASS_NAME[] = L"LazyplayWindow";

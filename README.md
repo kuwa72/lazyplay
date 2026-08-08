@@ -20,6 +20,15 @@ Mac の AirPlay ミラーリング機能を使い、低スペックな Windows �
 2. Mac と同一ネットワークに接続し、Mac の画面ミラーリングから `lazyplay-display` を選択
 3. 終了は `Esc` または `Q`、`Alt+Enter` で全画面/ウィンドウ切替
 
+**初回起動時のファイアウォール**: AirPlay は内向き TCP 5000/7000（と mDNS UDP 5353）を使います。
+初回起動時に許可されていなければ UAC で一度だけ許可を求められます（許可で以後不要）。
+Mac 側にデバイスは見えるのに接続だけできない場合はファイアウォールを確認してください。
+手動で許可する場合（管理者で実行）:
+
+```
+netsh advfirewall firewall add rule name="lazyplay" dir=in action=allow program="C:\path\to\lazyplay.exe" enable=yes profile=any
+```
+
 ### コマンドラインオプション
 
 | オプション | 説明 | デフォルト |
