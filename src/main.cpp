@@ -52,6 +52,19 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         }
         break;
 
+    case WM_RBUTTONUP:
+        // Keyboard-less (tablet) exit path: right-click / touch long-press quits
+        PostQuitMessage(0);
+        return 0;
+
+    case WM_SETCURSOR:
+        // Hide the mouse cursor over the video in fullscreen
+        if (g_renderer && g_renderer->IsFullscreen() && LOWORD(lParam) == HTCLIENT) {
+            SetCursor(nullptr);
+            return TRUE;
+        }
+        break;
+
     case WM_DESTROY:
         PostQuitMessage(0);
         return 0;
@@ -65,7 +78,7 @@ int main(int argc, char* argv[]) {
     uint32_t height = 1080;
     uint32_t targetFps = 30;
     bool vsync = true;
-    bool startFullscreen = false;
+    bool startFullscreen = true; // appliance default (dot-perfect on the panel)
 
     // Parse Command Line Arguments
     for (int i = 1; i < argc; ++i) {
@@ -87,6 +100,8 @@ int main(int argc, char* argv[]) {
             vsync = false;
         } else if (arg == "-fullscreen") {
             startFullscreen = true;
+        } else if (arg == "-window") {
+            startFullscreen = false;
         }
     }
 
@@ -99,6 +114,7 @@ int main(int argc, char* argv[]) {
     std::cout << "  lazyplay - Lightweight AirPlay Receiver " << std::endl;
     std::cout << "  Device Name: " << deviceName << std::endl;
     std::cout << "  Target Resolution: " << width << "x" << height << " @" << targetFps << "fps" << std::endl;
+    std::cout << "  Quit: right-click / long-press (or Esc)" << std::endl;
     std::cout << "==========================================" << std::endl;
 
     // Register Win32 Window Class
