@@ -37,6 +37,13 @@ netsh advfirewall firewall add rule name="lazyplay" dir=in action=allow program=
 | `-fps <30\|60>` | 最大フレームレート | `30` |
 | `-res <720p\|1080p>` | 受信解像度 | `1080p` |
 | `-vsync <0\|1>` | 垂直同期 | `1` |
+| `-fullscreen` | 起動時からボーダレス全画面（ドットバイドット表示用） | off |
+
+* 描画は Per-Monitor-V2 DPI aware のため、Windows の表示スケーリング（125% 等）下でも
+  物理ピクセルに 1:1 で描画されます。パネルネイティブ解像度での厳密な表示には
+  `-fullscreen` を推奨（ウィンドウ枠・タイトルバー分だけクライアント領域が減るため）。
+* Netflix 等の DRM 保護コンテンツはミラーリング画像に含まれません（macOS 側で黒化される
+  仕様。Apple TV 等でも同様の制約があります）。
 
 ## ビルド
 

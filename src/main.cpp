@@ -65,6 +65,7 @@ int main(int argc, char* argv[]) {
     uint32_t height = 1080;
     uint32_t targetFps = 30;
     bool vsync = true;
+    bool startFullscreen = false;
 
     // Parse Command Line Arguments
     for (int i = 1; i < argc; ++i) {
@@ -84,8 +85,15 @@ int main(int argc, char* argv[]) {
             vsync = (std::stoi(argv[++i]) != 0);
         } else if (arg == "-novsync") {
             vsync = false;
+        } else if (arg == "-fullscreen") {
+            startFullscreen = true;
         }
     }
+
+    // Per-monitor DPI awareness: the window maps 1:1 to physical pixels even
+    // when the display uses Windows scaling (tablets often default to 125%+),
+    // which otherwise bitmap-scales the video and shifts/blurs pixels.
+    SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 
     std::cout << "==========================================" << std::endl;
     std::cout << "  lazyplay - Lightweight AirPlay Receiver " << std::endl;
@@ -104,6 +112,7 @@ int main(int argc, char* argv[]) {
 
     RegisterClassW(&wc);
 
+    // With DPI awareness, AdjustWindowRect* yields physical pixels directly
     RECT wr = { 0, 0, static_cast<LONG>(width), static_cast<LONG>(height) };
     AdjustWindowRect(&wr, WS_OVERLAPPEDWINDOW, FALSE);
 
@@ -127,6 +136,12 @@ int main(int argc, char* argv[]) {
         return -1;
     }
     g_renderer = &renderer;
+
+    // Fullscreen from the start (e.g. -fullscreen for appliance-style displays);
+    // borderless window keeps the client area exactly at the panel resolution.
+    if (startFullscreen) {
+        renderer.ToggleFullscreen();
+    }
 
     // Initialize D3D11 / DXVA2 Hardware H.264 Decoder (no software fallback, REQUIREMENTS 2.2)
     D3D11H264Decoder decoder;
