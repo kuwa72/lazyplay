@@ -182,8 +182,9 @@ int main(int argc, char* argv[]) {
                       << " (input " << size << "B)" << std::endl;
         }
     };
-    VideoSizeCallback sizeCallback = [](uint32_t w, uint32_t h) {
+    VideoSizeCallback sizeCallback = [&](uint32_t w, uint32_t h) {
         std::cout << "[Video] Client reports stream size: " << w << "x" << h << std::endl;
+        renderer.SetDisplayHint(w, h); // crop macroblock padding (e.g. 1080p in a 1088 buffer)
     };
     rtsp.SetVideoDataCallback(videoCallback);
     rtsp.SetVideoSizeCallback(sizeCallback);

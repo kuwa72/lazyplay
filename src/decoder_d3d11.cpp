@@ -116,6 +116,7 @@ bool D3D11H264Decoder::SetOutputType() {
                 outputType->GetUINT64(MF_MT_FRAME_SIZE, &frameSize);
                 m_width = static_cast<uint32_t>(frameSize >> 32);
                 m_height = static_cast<uint32_t>(frameSize & 0xFFFFFFFF);
+                m_codedHeight = m_height;
                 return true;
             }
         }
@@ -219,14 +220,22 @@ bool D3D11H264Decoder::HandleOutput(ComPtr<IMFSample>& sample,
         }
     }
 
-    // CPU path: contiguous NV12 buffer
+    // CPU path: contiguous NV12 buffer (coded height may be MB-aligned; repack visible region)
     ComPtr<IMF2DBuffer> buffer2D;
     BYTE* pData = nullptr;
     LONG pitch = 0;
     if (SUCCEEDED(buffer.As(&buffer2D)) && SUCCEEDED(buffer2D->Lock2D(&pData, &pitch))) {
-        size_t total = static_cast<size_t>(pitch) * m_height * 3 / 2;
-        outCpu.assign(pData, pData + total);
-        outCpuPitch = static_cast<uint32_t>(pitch);
+        outCpu.resize(static_cast<size_t>(m_width) * m_height * 3 / 2);
+        uint8_t* dstY = outCpu.data();
+        for (uint32_t y = 0; y < m_height; ++y) {
+            memcpy(dstY + y * m_width, pData + static_cast<size_t>(y) * pitch, m_width);
+        }
+        const uint8_t* srcUV = pData + static_cast<size_t>(pitch) * m_codedHeight;
+        uint8_t* dstUV = outCpu.data() + static_cast<size_t>(m_width) * m_height;
+        for (uint32_t y = 0; y < m_height / 2; ++y) {
+            memcpy(dstUV + y * m_width, srcUV + static_cast<size_t>(y) * pitch, m_width);
+        }
+        outCpuPitch = m_width;
         buffer2D->Unlock2D();
         return true;
     }

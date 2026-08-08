@@ -41,6 +41,11 @@ public:
     // VSync sync interval (1 = every vblank, 2 = every other, ...). 0 = no vsync.
     void SetSyncInterval(uint32_t interval) { m_syncInterval = interval; }
 
+    // Client-reported visible (display) size. The coded NV12 frame may be
+    // macroblock-padded (e.g. 640x368 for 360p); when a hint is set and is
+    // consistent with the coded size, sampling is cropped to the visible region.
+    void SetDisplayHint(uint32_t width, uint32_t height);
+
     // Diagnostics/tests: the current NV12 video texture (may be null before the first frame)
     ID3D11Texture2D* GetVideoTexture() const { return m_videoTexture.Get(); }
     void GetVideoSize(uint32_t& w, uint32_t& h) const { w = m_videoWidth; h = m_videoHeight; }
@@ -48,6 +53,7 @@ public:
 private:
     bool CreateShaderResources();
     bool EnsureVideoTexture(uint32_t width, uint32_t height);
+    void UpdateVertexBuffer(float texU, float texV);
 
     HWND m_hwnd = nullptr;
     uint32_t m_width = 1280;   // window client size
@@ -69,8 +75,12 @@ private:
     ComPtr<ID3D11Texture2D> m_videoTexture;
     ComPtr<ID3D11ShaderResourceView> m_luminanceSRV;   // DXGI_FORMAT_R8_UNORM
     ComPtr<ID3D11ShaderResourceView> m_chrominanceSRV; // DXGI_FORMAT_R8G8_UNORM
-    uint32_t m_videoWidth = 0;
+    uint32_t m_videoWidth = 0;   // coded (buffer) size
     uint32_t m_videoHeight = 0;
+    uint32_t m_visibleWidth = 0;  // display region within the coded frame
+    uint32_t m_visibleHeight = 0;
+    uint32_t m_hintWidth = 0;     // client-reported display size (0 = none)
+    uint32_t m_hintHeight = 0;
     bool m_hasFrame = false;
 
     ComPtr<ID3D11VertexShader> m_vertexShader;

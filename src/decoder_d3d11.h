@@ -43,8 +43,9 @@ private:
                       uint32_t& outWidth, uint32_t& outHeight);
 
     bool m_initialized = false;
-    uint32_t m_width = 1280;
+    uint32_t m_width = 1280;       // visible size (display region)
     uint32_t m_height = 720;
+    uint32_t m_codedHeight = 720;  // MB-aligned buffer height (UV plane offset math)
     int64_t m_sampleTime = 0;
 
     ComPtr<IMFTransform> m_mftDecoder;

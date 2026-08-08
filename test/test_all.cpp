@@ -255,21 +255,24 @@ static int TestDecode(const char* path) {
     int decodedFrames = 0;
     static const uint8_t startCode[4] = { 0, 0, 0, 1 };
     std::vector<uint8_t> au;
-    for (const auto& nal : nals) {
-        au.clear();
-        au.insert(au.end(), startCode, startCode + 4);
-        au.insert(au.end(), nal.begin(), nal.end());
+    auto feedNals = [&](const std::vector<std::vector<uint8_t>>& nalList) {
+        for (const auto& nal : nalList) {
+            au.clear();
+            au.insert(au.end(), startCode, startCode + 4);
+            au.insert(au.end(), nal.begin(), nal.end());
 
-        ComPtr<ID3D11Texture2D> texture;
-        uint32_t sub = 0, w = 0, h = 0, cpuPitch = 0;
-        ComPtr<IMFSample> holder;
-        std::vector<uint8_t> cpu;
-        if (decoder.Decode(au.data(), au.size(), texture, sub, holder, cpu, cpuPitch, w, h)) {
-            decodedFrames++;
-            if (texture) renderer.RenderNV12Frame(texture.Get(), sub, w, h);
-            else if (!cpu.empty()) renderer.RenderNV12Cpu(cpu.data(), w, h, cpuPitch);
+            ComPtr<ID3D11Texture2D> texture;
+            uint32_t sub = 0, w = 0, h = 0, cpuPitch = 0;
+            ComPtr<IMFSample> holder;
+            std::vector<uint8_t> cpu;
+            if (decoder.Decode(au.data(), au.size(), texture, sub, holder, cpu, cpuPitch, w, h)) {
+                decodedFrames++;
+                if (texture) renderer.RenderNV12Frame(texture.Get(), sub, w, h);
+                else if (!cpu.empty()) renderer.RenderNV12Cpu(cpu.data(), w, h, cpuPitch);
+            }
         }
-    }
+    };
+    feedNals(nals);
     std::cout << "[Decode] frames produced: " << decodedFrames << std::endl;
     CHECK(decodedFrames >= 50, "decoded >= 50 of 60 frames");
 
@@ -316,6 +319,28 @@ static int TestDecode(const char* path) {
         }
     }
     CHECK(textureOk, "rendered NV12 frame contains real image data");
+
+    // Resolution switch mid-stream (client sends new SPS/PPS + smaller frames)
+    std::vector<uint8_t> stream2 = ReadFileBytes("test/test_640x360.h264");
+    if (!stream2.empty()) {
+        auto nals2 = SplitNals(stream2);
+        int before = decodedFrames;
+        feedNals(nals2);
+        int produced2 = decodedFrames - before;
+        std::cout << "[Decode] after 640x360 switch: +" << produced2 << " frames" << std::endl;
+        CHECK(produced2 >= 25, "decoded >= 25 of 30 frames after resolution switch");
+        uint32_t w2 = 0, h2 = 0;
+        renderer.GetVideoSize(w2, h2);
+        // MFT reports the MB-aligned coded size (640x368); the client-reported
+        // display hint crops the visible region for display
+        CHECK(w2 == 640 && h2 == 368, "video texture resized to coded 640x368");
+        renderer.SetDisplayHint(640, 360);
+        renderer.GetVideoSize(w2, h2); // coded size unchanged after hint
+        CHECK(w2 == 640 && h2 == 368, "display hint keeps coded texture");
+        CHECK(decodedFrames > before, "frames continue after hint change");
+    } else {
+        std::cout << "[Decode] (skip resolution-switch test; fixture missing)" << std::endl;
+    }
 
     decoder.Shutdown();
     renderer.Cleanup();
@@ -640,6 +665,7 @@ static int TestE2E(const char* host, const char* path) {
 
     uint64_t ts = spsTs; // first encrypted packet must share the SPS/PPS timestamp
     int sentPackets = 0;
+    bool audioSetupDone = false;
     for (const auto& nal : nals) {
         int type = nal[0] & 0x1F;
         if (type == 7 || type == 8) continue; // already sent via parameter packet
@@ -663,9 +689,39 @@ static int TestE2E(const char* host, const char* path) {
         }
         sentPackets++;
         ts += 33333; // ~30fps in the client's ns-domain clock units
+
+        // Mid-stream: client adds an audio stream (type 96), as macOS does when
+        // audio follows the AirPlay target. The video session must survive it.
+        if (!audioSetupDone && sentPackets == 20) {
+            audioSetupDone = true;
+            BPNode asetup = BPNode::MakeDict();
+            BPNode astreams = BPNode::MakeArray();
+            BPNode ast = BPNode::MakeDict();
+            ast.Set("type", BPNode::MakeInt(96));
+            ast.Set("controlPort", BPNode::MakeInt(timingPort));
+            ast.Set("ct", BPNode::MakeInt(8));
+            ast.Set("spf", BPNode::MakeInt(480));
+            astreams.Append(ast);
+            asetup.Set("streams", astreams);
+            std::vector<uint8_t> asetupBin = BPlistWrite(asetup);
+            RtspResponse aresp;
+            bool ok = RtspExchange(s, "SETUP", "rtsp://127.0.0.1/1", cseq,
+                                   "application/x-apple-binary-plist", asetupBin, aresp);
+            CHECK(ok && aresp.status == 200, "mid-stream audio SETUP -> 200");
+            if (ok) {
+                BPNode r;
+                if (BPlistParse(aresp.body.data(), aresp.body.size(), r)) {
+                    const BPNode* rs = r.Find("streams");
+                    CHECK(rs && rs->type == BPNode::Type::Array && !rs->array.empty() &&
+                          rs->array[0].FindInt("dataPort", 0) != 0,
+                          "audio stream response carries dataPort");
+                }
+            }
+        }
     }
     std::cout << "[E2E] streamed " << sentPackets << " encrypted video packets" << std::endl;
     CHECK(sentPackets > 40, "streamed the video");
+    CHECK(audioSetupDone, "audio SETUP was exercised mid-stream");
 
     // give the server a moment to decode/render, then verify it is still healthy
     Sleep(1500);

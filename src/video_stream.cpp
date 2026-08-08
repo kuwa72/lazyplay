@@ -94,6 +94,9 @@ void MirrorVideoServer::SetStreamKey(const uint8_t key[16], const uint8_t iv[16]
 void MirrorVideoServer::ResetStreamState() {
     m_spsPps.clear();
     m_prependSpsPps = false;
+    m_vclPackets = 0;
+    m_vclBytes = 0;
+    m_framesToDecoder = 0;
 }
 
 void MirrorVideoServer::ThreadMain() {
@@ -114,6 +117,13 @@ void MirrorVideoServer::ThreadMain() {
         DWORD recvTimeout = 1000;
         setsockopt(stream, SOL_SOCKET, SO_RCVTIMEO, (const char*)&recvTimeout, sizeof(recvTimeout));
 
+        // Large receive buffer to absorb IDR bursts on big scene changes
+        // (weak CPU + Wi-Fi can otherwise back-pressure the TCP stream)
+        int rcvBuf = 8 * 1024 * 1024;
+        setsockopt(stream, SOL_SOCKET, SO_RCVBUF, (const char*)&rcvBuf, sizeof(rcvBuf));
+        int nodelay = 1;
+        setsockopt(stream, IPPROTO_TCP, TCP_NODELAY, (const char*)&nodelay, sizeof(nodelay));
+
         ResetStreamState();
 
         while (m_running) {
@@ -126,17 +136,20 @@ void MirrorVideoServer::ThreadMain() {
                 break;
             }
 
-            std::vector<uint8_t> payload(payloadSize);
-            if (payloadSize > 0 && !RecvAll(stream, payload.data(), payloadSize)) break;
+            m_payloadBuf.resize(payloadSize);
+            if (payloadSize > 0 && !RecvAll(stream, m_payloadBuf.data(), payloadSize)) break;
 
-            HandlePacket(header, payload);
+            HandlePacket(header, m_payloadBuf);
         }
 
+        if (m_running) {
+            int err = WSAGetLastError();
+            std::cout << "[Mirror] Video data channel closed (wsa=" << err
+                      << ", packets=" << m_vclPackets << ", bytes=" << m_vclBytes
+                      << ", toDecoder=" << m_framesToDecoder << "); waiting for reconnect." << std::endl;
+        }
         closesocket(stream);
         ResetStreamState();
-        if (m_running) {
-            std::cout << "[Mirror] Video stream disconnected; waiting for reconnect." << std::endl;
-        }
     }
 }
 

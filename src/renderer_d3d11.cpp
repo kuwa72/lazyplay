@@ -166,13 +166,35 @@ void D3D11Renderer::ToggleFullscreen() {
     }
 }
 
-bool D3D11Renderer::CreateShaderResources() {
-    // Fullscreen quad
+void D3D11Renderer::SetDisplayHint(uint32_t width, uint32_t height) {
+    std::lock_guard<std::mutex> lock(m_frameMutex);
+    if (m_hintWidth == width && m_hintHeight == height) return;
+    m_hintWidth = width;
+    m_hintHeight = height;
+    // Re-evaluate the visible crop against the existing texture (no content loss)
+    if (m_videoTexture && m_videoWidth > 0) {
+        uint32_t visW = m_videoWidth, visH = m_videoHeight;
+        if (width > 0 && height > 0 && width <= m_videoWidth && height <= m_videoHeight &&
+            m_videoWidth - width < 32 && m_videoHeight - height < 32) {
+            visW = width;
+            visH = height;
+        }
+        if (visW != m_visibleWidth || visH != m_visibleHeight) {
+            m_visibleWidth = visW;
+            m_visibleHeight = visH;
+            UpdateVertexBuffer(static_cast<float>(visW) / m_videoWidth,
+                               static_cast<float>(visH) / m_videoHeight);
+            m_frameDirty = true;
+        }
+    }
+}
+
+void D3D11Renderer::UpdateVertexBuffer(float texU, float texV) {
     Vertex vertices[] = {
         { {-1.0f,  1.0f}, {0.0f, 0.0f} },
-        { { 1.0f,  1.0f}, {1.0f, 0.0f} },
-        { {-1.0f, -1.0f}, {0.0f, 1.0f} },
-        { { 1.0f, -1.0f}, {1.0f, 1.0f} },
+        { { 1.0f,  1.0f}, {texU, 0.0f} },
+        { {-1.0f, -1.0f}, {0.0f, texV} },
+        { { 1.0f, -1.0f}, {texU, texV} },
     };
 
     D3D11_BUFFER_DESC bd = {};
@@ -183,12 +205,17 @@ bool D3D11Renderer::CreateShaderResources() {
     D3D11_SUBRESOURCE_DATA initData = {};
     initData.pSysMem = vertices;
 
-    HRESULT hr = m_device->CreateBuffer(&bd, &initData, &m_vertexBuffer);
-    if (FAILED(hr)) return false;
+    m_vertexBuffer.Reset();
+    m_device->CreateBuffer(&bd, &initData, &m_vertexBuffer);
+}
+
+bool D3D11Renderer::CreateShaderResources() {
+    UpdateVertexBuffer(1.0f, 1.0f);
+    if (!m_vertexBuffer) return false;
 
     // Compile shaders
     ComPtr<ID3DBlob> vsBlob, psBlob, errorBlob;
-    hr = D3DCompile(SHADER_SOURCE, strlen(SHADER_SOURCE), nullptr, nullptr, nullptr,
+    HRESULT hr = D3DCompile(SHADER_SOURCE, strlen(SHADER_SOURCE), nullptr, nullptr, nullptr,
                     "VSMain", "vs_4_0", 0, 0, &vsBlob, &errorBlob);
     if (FAILED(hr)) {
         std::cerr << "[D3D11] VS compile failed: "
@@ -263,7 +290,24 @@ bool D3D11Renderer::EnsureVideoTexture(uint32_t width, uint32_t height) {
 
     m_videoWidth = width;
     m_videoHeight = height;
-    std::cout << "[D3D11] Video texture created: " << width << "x" << height << std::endl;
+
+    // Visible region: client hint when consistent, otherwise the whole coded frame
+    m_visibleWidth = width;
+    m_visibleHeight = height;
+    if (m_hintWidth > 0 && m_hintHeight > 0 &&
+        m_hintWidth <= width && m_hintHeight <= height &&
+        width - m_hintWidth < 32 && height - m_hintHeight < 32) {
+        m_visibleWidth = m_hintWidth;
+        m_visibleHeight = m_hintHeight;
+    }
+    UpdateVertexBuffer(static_cast<float>(m_visibleWidth) / width,
+                       static_cast<float>(m_visibleHeight) / height);
+
+    std::cout << "[D3D11] Video texture created: " << width << "x" << height;
+    if (m_visibleWidth != width || m_visibleHeight != height) {
+        std::cout << " (visible " << m_visibleWidth << "x" << m_visibleHeight << ")";
+    }
+    std::cout << std::endl;
     return true;
 }
 
@@ -301,15 +345,16 @@ bool D3D11Renderer::Present() {
     if (!m_swapChain || !m_renderTargetView) return false;
     if (!m_frameDirty && !m_presentForced) return false; // nothing new: skip present
 
+    { // frame mutex scope: texture updates vs drawing are serialized here
     std::lock_guard<std::mutex> lock(m_frameMutex);
 
     float clearColor[4] = { 0.05f, 0.05f, 0.08f, 1.0f };
     m_context->ClearRenderTargetView(m_renderTargetView.Get(), clearColor);
 
-    if (m_hasFrame && m_videoTexture && m_videoWidth > 0 && m_videoHeight > 0) {
-        // Aspect-preserved (letterboxed) viewport
+    if (m_hasFrame && m_videoTexture && m_visibleWidth > 0 && m_visibleHeight > 0) {
+        // Aspect-preserved (letterboxed) viewport, using the visible region
         float windowAspect = static_cast<float>(m_width) / m_height;
-        float videoAspect = static_cast<float>(m_videoWidth) / m_videoHeight;
+        float videoAspect = static_cast<float>(m_visibleWidth) / m_visibleHeight;
         float vpW = static_cast<float>(m_width), vpH = static_cast<float>(m_height);
         float vpX = 0.0f, vpY = 0.0f;
         if (windowAspect > videoAspect) {
@@ -342,6 +387,8 @@ bool D3D11Renderer::Present() {
         m_context->OMSetRenderTargets(1, m_renderTargetView.GetAddressOf(), nullptr);
         m_context->Draw(4, 0);
     }
+    } // release m_frameMutex BEFORE Present: a vsync-blocking Present must never
+      // stall the network/decode thread that feeds RenderNV12Frame
 
     m_swapChain->Present(m_vsync ? m_syncInterval : 0, 0);
     m_frameDirty = false;

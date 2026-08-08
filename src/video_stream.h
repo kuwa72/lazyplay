@@ -61,6 +61,7 @@ private:
     uint64_t m_spsPpsTimestamp = 0;
 
     // Reused per-packet work buffers (avoid allocator churn on weak CPUs)
+    std::vector<uint8_t> m_payloadBuf;
     std::vector<uint8_t> m_decrypted;
     std::vector<uint8_t> m_annexB;
 
