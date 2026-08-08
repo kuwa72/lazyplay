@@ -13,5 +13,6 @@
 /test/test.aac
 /test/probe_aac.cpp
 
-# Third-party source build (FFmpeg downloaded on demand)
-/thirdparty/
+# Third-party source build (FFmpeg source tarball is vendored; build dir is generated)
+/thirdparty/ffmpeg/
+!/thirdparty/ffmpeg-*.tar.xz
