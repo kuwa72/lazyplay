@@ -1,6 +1,15 @@
 #include "audio_decoder.h"
 
-#include <aacdecoder_lib.h>
+extern "C" {
+#include <libavcodec/avcodec.h>
+#include <libavcodec/packet.h>
+#include <libavutil/channel_layout.h>
+#include <libavutil/error.h>
+#include <libavutil/mem.h>
+#include <libavutil/samplefmt.h>
+}
+
+#include <cmath>
 #include <cstring>
 
 AacEldDecoder::AacEldDecoder() {}
@@ -10,47 +19,101 @@ AacEldDecoder::~AacEldDecoder() {
 }
 
 bool AacEldDecoder::Init() {
-    m_dec = aacDecoder_Open(TT_MP4_RAW, 1);
-    if (!m_dec) return false;
+    const AVCodec* codec = avcodec_find_decoder(AV_CODEC_ID_AAC);
+    if (!codec) return false;
+    m_codec = const_cast<void*>(static_cast<const void*>(codec));
 
-    // AudioSpecificConfig for AAC-ELD 44100 Hz stereo (same value UxPlay uses)
-    uint8_t asc[] = { 0xF8, 0xE8, 0x50, 0x00 };
-    UCHAR* conf[] = { asc };
-    UINT confLen[] = { sizeof(asc) };
-    if (aacDecoder_ConfigRaw(static_cast<HANDLE_AACDECODER>(m_dec), conf, confLen) != AAC_DEC_OK) {
+    AVCodecContext* ctx = avcodec_alloc_context3(codec);
+    if (!ctx) return false;
+    m_ctx = ctx;
+
+    // AudioSpecificConfig for AAC-ELD 44100 Hz stereo (same value UxPlay uses).
+    // FFmpeg's native AAC decoder needs the ASC in extradata to select ELD.
+    static const uint8_t asc[] = { 0xF8, 0xE8, 0x50, 0x00 };
+    ctx->extradata = (uint8_t*)av_mallocz(sizeof(asc) + AV_INPUT_BUFFER_PADDING_SIZE);
+    if (!ctx->extradata) {
         Shutdown();
         return false;
     }
+    memcpy(ctx->extradata, asc, sizeof(asc));
+    ctx->extradata_size = static_cast<int>(sizeof(asc));
+
+    ctx->sample_rate = 44100;
+    av_channel_layout_default(&ctx->ch_layout, 2);
+
+    if (avcodec_open2(ctx, codec, nullptr) < 0) {
+        Shutdown();
+        return false;
+    }
+
+    AVFrame* frame = av_frame_alloc();
+    if (!frame) {
+        Shutdown();
+        return false;
+    }
+    m_frame = frame;
+
+    AVPacket* pkt = av_packet_alloc();
+    if (!pkt) {
+        Shutdown();
+        return false;
+    }
+    m_pkt = pkt;
+
     return true;
 }
 
 void AacEldDecoder::Shutdown() {
-    if (m_dec) {
-        aacDecoder_Close(static_cast<HANDLE_AACDECODER>(m_dec));
-        m_dec = nullptr;
+    if (m_pkt) {
+        AVPacket* pkt = static_cast<AVPacket*>(m_pkt);
+        av_packet_free(&pkt);
+        m_pkt = pkt;
     }
+    if (m_frame) {
+        AVFrame* frame = static_cast<AVFrame*>(m_frame);
+        av_frame_free(&frame);
+        m_frame = frame;
+    }
+    if (m_ctx) {
+        AVCodecContext* ctx = static_cast<AVCodecContext*>(m_ctx);
+        avcodec_free_context(&ctx);
+        m_ctx = ctx;
+    }
+    m_codec = nullptr;
 }
 
 bool AacEldDecoder::Decode(const uint8_t* frame, size_t len, std::vector<int16_t>& pcm) {
-    if (!m_dec || !frame || len == 0) return false;
+    if (!m_ctx || !m_pkt || !m_frame || !frame || len == 0) return false;
 
-    HANDLE_AACDECODER dec = static_cast<HANDLE_AACDECODER>(m_dec);
-    uint8_t* inBuf[] = { const_cast<uint8_t*>(frame) };
-    UINT inLen[] = { static_cast<UINT>(len) };
-    UINT valid = static_cast<UINT>(len);
+    AVCodecContext* ctx = static_cast<AVCodecContext*>(m_ctx);
+    AVPacket* pkt = static_cast<AVPacket*>(m_pkt);
+    AVFrame* out = static_cast<AVFrame*>(m_frame);
 
-    if (aacDecoder_Fill(dec, inBuf, inLen, &valid) != AAC_DEC_OK) return false;
+    pkt->data = const_cast<uint8_t*>(frame);
+    pkt->size = static_cast<int>(len);
 
-    pcm.resize(8192); // comfortably holds one ELD frame (480 samples x 2ch)
-    AAC_DECODER_ERROR err = aacDecoder_DecodeFrame(dec, pcm.data(),
-                                                 static_cast<UINT>(pcm.size()), 0);
-    if (err == AAC_DEC_NOT_ENOUGH_BITS || err == AAC_DEC_TRANSPORT_SYNC_ERROR) {
-        return false; // incomplete/corrupt frame: skip
+    int ret = avcodec_send_packet(ctx, pkt);
+    if (ret < 0 && ret != AVERROR(EAGAIN)) return false;
+
+    ret = avcodec_receive_frame(ctx, out);
+    if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) return false;
+    if (ret < 0) return false;
+
+    // FFmpeg native AAC decoder outputs AV_SAMPLE_FMT_FLTP (planar float).
+    if (out->format != AV_SAMPLE_FMT_FLTP) return false;
+
+    int nb_samples = out->nb_samples;
+    int channels = ctx->ch_layout.nb_channels;
+    if (channels <= 0 || nb_samples <= 0) return false;
+
+    pcm.resize(nb_samples * channels);
+    for (int i = 0; i < nb_samples; ++i) {
+        for (int c = 0; c < channels; ++c) {
+            float s = reinterpret_cast<float*>(out->data[c])[i];
+            if (s < -1.0f) s = -1.0f;
+            else if (s > 1.0f) s = 1.0f;
+            pcm[i * channels + c] = static_cast<int16_t>(std::round(s * 32767.0f));
+        }
     }
-    if (err != AAC_DEC_OK) return false;
-
-    const CStreamInfo* info = aacDecoder_GetStreamInfo(dec);
-    if (!info || info->frameSize <= 0) return false;
-    pcm.resize(info->frameSize * info->numChannels);
     return true;
 }

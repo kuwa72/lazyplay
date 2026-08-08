@@ -26,9 +26,9 @@
 #include "../src/renderer_d3d11.h"
 #include "../src/decoder_d3d11.h"
 #include "../src/audio_wasapi.h"
+#include "../src/audio_decoder.h"
 
 #include <cmath>
-#include <aacdecoder_lib.h>
 
 extern "C" {
 #include "../src/playfair/playfair.h"
@@ -270,6 +270,16 @@ static void TestBplist() {
     }
 }
 
+static int TestAacEldInit() {
+    std::cout << "[AAC-ELD decoder]" << std::endl;
+    AacEldDecoder dec;
+    CHECK(dec.Init(), "AacEldDecoder.Init() with FFmpeg AAC decoder");
+    std::vector<int16_t> pcm;
+    CHECK(!dec.Decode(nullptr, 0, pcm), "Decode(nullptr, 0) returns false");
+    dec.Shutdown();
+    return 0;
+}
+
 // ---------- decode + render test ----------
 
 static LRESULT CALLBACK TestWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
@@ -509,59 +519,6 @@ static void PutLE64(uint8_t* p, uint64_t v) { memcpy(p, &v, 8); }
 static void PutLEFloat(uint8_t* p, float f) { memcpy(p, &f, 4); }
 
 // ---------- audio tests ----------
-
-// Decode AAC-LC frames (ADTS file) through the vendored FDK decoder.
-// (Exercises the same fdk open/config/fill/decode mechanics the ELD path uses.)
-static int TestAacDecode(const char* path) {
-    std::vector<uint8_t> adts = ReadFileBytes(path);
-    if (adts.empty()) { std::cerr << "cannot read " << path << std::endl; return 1; }
-
-    HANDLE_AACDECODER dec = aacDecoder_Open(TT_MP4_RAW, 1);
-    CHECK(dec != nullptr, "fdk aacDecoder_Open");
-    uint8_t ascLC[2] = { 0x12, 0x10 }; // AAC-LC 44100 stereo
-    UCHAR* conf[] = { ascLC };
-    UINT confLen[] = { 2 };
-    CHECK(aacDecoder_ConfigRaw(dec, conf, confLen) == AAC_DEC_OK, "fdk ConfigRaw (LC)");
-
-    // Split ADTS frames
-    int frames = 0, okFrames = 0;
-    long long totalSamples = 0;
-    double energy = 0;
-    size_t pos = 0;
-    std::vector<int16_t> pcm;
-    while (pos + 7 <= adts.size()) {
-        if (adts[pos] != 0xFF || (adts[pos + 1] & 0xF0) != 0xF0) { pos++; continue; }
-        size_t frameLen = ((adts[pos + 3] & 0x3) << 11) | (adts[pos + 4] << 3) | ((adts[pos + 5] & 0xE0) >> 5);
-        if (frameLen < 7 || pos + frameLen > adts.size()) break;
-        const uint8_t* raw = adts.data() + pos + 7; // strip 7-byte ADTS header
-        size_t rawLen = frameLen - 7;
-
-        uint8_t* inBuf[] = { const_cast<uint8_t*>(raw) };
-        UINT inLen[] = { (UINT)rawLen };
-        UINT valid = (UINT)rawLen;
-        if (aacDecoder_Fill(dec, inBuf, inLen, &valid) == AAC_DEC_OK) {
-            pcm.resize(4096);
-            if (aacDecoder_DecodeFrame(dec, pcm.data(), (UINT)pcm.size(), 0) == AAC_DEC_OK) {
-                const CStreamInfo* info = aacDecoder_GetStreamInfo(dec);
-                okFrames++;
-                totalSamples += info->frameSize;
-                for (int i = 0; i < info->frameSize * info->numChannels; ++i) {
-                    double s = pcm[i] / 32768.0;
-                    energy += s * s;
-                }
-            }
-        }
-        frames++;
-        pos += frameLen;
-    }
-    std::cout << "[AudioDec] adts frames=" << frames << " decoded=" << okFrames
-              << " samples=" << totalSamples << std::endl;
-    CHECK(frames > 80, "parsed >80 ADTS frames (2s @1024)");
-    CHECK(okFrames > 80, "decoded >80 frames");
-    CHECK(energy > 1.0, "PCM is non-silent (sine wave energy)");
-    aacDecoder_Close(dec);
-    return 0;
-}
 
 // WASAPI smoke test: push 0.5s of 440 Hz sine through the player
 static int TestWasapi() {
@@ -984,16 +941,15 @@ int main(int argc, char** argv) {
         TestAesCtr();
         TestAesCbc();
         TestBplist();
+        TestAacEldInit();
     } else if (mode == "decode" && argc > 2) {
         TestDecode(argv[2]);
-    } else if (mode == "adec" && argc > 2) {
-        TestAacDecode(argv[2]);
     } else if (mode == "wasapi") {
         TestWasapi();
     } else if (mode == "e2e" && argc > 3) {
         TestE2E(argv[2], argv[3]);
     } else {
-        std::cerr << "usage: test_all.exe unit | decode <file.h264> | adec <file.aac> | wasapi | e2e <host> <file.h264>" << std::endl;
+        std::cerr << "usage: test_all.exe unit | decode <file.h264> | wasapi | e2e <host> <file.h264>" << std::endl;
         return 2;
     }
 

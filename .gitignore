@@ -12,3 +12,6 @@
 # Local test fixtures / probes
 /test/test.aac
 /test/probe_aac.cpp
+
+# Third-party source build (FFmpeg downloaded on demand)
+/thirdparty/

@@ -49,11 +49,11 @@ netsh advfirewall firewall add rule name="lazyplay" dir=in action=allow program=
 
 ## ビルド
 
-Windows 上の MinGW-w64 (gcc/g++) で:
+Windows 上の MinGW-w64 (gcc/g++) / MSYS2 (UCRT64) で:
 
 ```
-make            # lazyplay.exe
-make test       # ユニットテスト (SHA-512 / AES-CTR / AES-CBC / bplist / FDK AAC / WASAPI)
+make            # lazyplay.exe（初回は FFmpeg ソースもダウンロード・ビルド）
+make test       # ユニットテスト (SHA-512 / AES-CTR / AES-CBC / bplist / WASAPI)
 ```
 
 統合テスト（実 H.264 ストリームのデコード＆描画検証 / プロトコル E2E）:
@@ -64,14 +64,11 @@ make test       # ユニットテスト (SHA-512 / AES-CTR / AES-CBC / bplist / 
 ./test/test_all.exe e2e 127.0.0.1 test/test.h264
 ```
 
-`test/test.aac`（ADTS 形式）があれば、AAC デコーダの検証もできます:
-
 ```
-./test/test_all.exe adec test/test.aac
 ./test/test_all.exe wasapi   # 440 Hz サイン波が鳴る簡易再生テスト
 ```
 
-MSVC の場合は `CMakeLists.txt` を使用してください。
+MSVC は FFmpeg ソースビルドに未対応のため、MSYS2 UCRT64 + `make` を推奨します。`CMakeLists.txt` は MinGW-w64 用に FFmpeg 自動ビルドを含みます。
 
 ## 動作環境
 
@@ -86,7 +83,7 @@ MSVC の場合は `CMakeLists.txt` を使用してください。
   [UxPlay](https://github.com/FDH2/UxPlay) / RPiPlay の実装を参照しています
 - FairPlay 部分は UxPlay 同梱の `playfair` を vendoring (`src/playfair/`)
 - 音声は RTP/UDP (stream type 96) を AES-128-CBC で復号し、
-  vendored Fraunhofer FDK AAC (`src/fdk-aac/`) で AAC-ELD を PCM にデコード、
+  FFmpeg のネイティブ AAC デコーダ（LGPL）で AAC-ELD を PCM にデコード、
   WASAPI 共有モードで再生
 
 ## License
@@ -94,4 +91,5 @@ MSVC の場合は `CMakeLists.txt` を使用してください。
 GPLv3 — `playfair` (FairPlay SAP) を vendoring している関係上、本プロジェクト全体も GPLv3 で公開します。
 See [LICENSE](LICENSE).
 
-Fraunhofer FDK AAC デコーダは `src/fdk-aac/NOTICE` の条項の下で vendoring しています。
+FFmpeg は初回ビルド時に `thirdparty/` にダウンロード・ビルドされます。`libavcodec` の
+ネイティブ AAC デコーダは LGPL-2.1-or-later で、GPLv3 とのリンクが可能です。

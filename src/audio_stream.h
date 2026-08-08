@@ -13,7 +13,7 @@
 
 // AirPlay mirror audio receiver (stream type 96): RTP/UDP, AES-128-CBC
 // (per-packet IV reset, partial tail plaintext), AAC-ELD frames decoded via
-// the vendored FDK decoder and played through WASAPI.
+// FFmpeg libavcodec and played through WASAPI.
 class AudioReceiver {
 public:
     AudioReceiver();

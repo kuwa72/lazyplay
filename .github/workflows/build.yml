@@ -23,6 +23,8 @@ jobs:
           install: >-
             make
             mingw-w64-ucrt-x86_64-gcc
+            diffutils
+            curl
 
       - name: Build
         shell: msys2 {0}
@@ -40,8 +42,7 @@ jobs:
         shell: pwsh
         run: |
           strip lazyplay.exe
-          Copy-Item src/fdk-aac/NOTICE NOTICE-FDK-AAC -Force
-          Compress-Archive -Path lazyplay.exe, README.md, LICENSE, NOTICE-FDK-AAC -DestinationPath lazyplay-win-x64.zip
+          Compress-Archive -Path lazyplay.exe, README.md, LICENSE -DestinationPath lazyplay-win-x64.zip
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

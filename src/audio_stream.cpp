@@ -114,7 +114,7 @@ void AudioReceiver::ThreadMain() {
 
         std::vector<int16_t> pcm;
         if (m_decoder.Decode(m_decryptBuf.data(), payloadLen, pcm)) {
-            // fdk frameSize = samples per channel; stereo interleaved
+            // frameSize = samples per channel; stereo interleaved
             m_player.PushPcm(pcm.data(), pcm.size() / 2);
             m_decodedFrames++;
             int16_t maxS = 0;

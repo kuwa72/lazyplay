@@ -9,6 +9,47 @@ if(MSVC)
     add_compile_options(/W4 /EHsc /utf-8)
 endif()
 
+# FFmpeg: downloaded/built on demand for AAC-ELD decoding.
+# It is built with only the native AAC decoder, which is LGPL-compatible.
+set(FFMPEG_DIR "${CMAKE_SOURCE_DIR}/thirdparty/ffmpeg" CACHE PATH "FFmpeg source/build directory")
+set(FFMPEG_VER "7.1.1" CACHE STRING "FFmpeg version")
+set(FFMPEG_TAR "${CMAKE_SOURCE_DIR}/thirdparty/ffmpeg-${FFMPEG_VER}.tar.xz")
+set(FFMPEG_URL "https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VER}.tar.xz")
+
+if(NOT EXISTS "${FFMPEG_DIR}/libavcodec/libavcodec.a" OR NOT EXISTS "${FFMPEG_DIR}/libavutil/libavutil.a")
+    if(NOT EXISTS "${FFMPEG_TAR}")
+        message(STATUS "Downloading FFmpeg ${FFMPEG_VER}...")
+        file(DOWNLOAD ${FFMPEG_URL} ${FFMPEG_TAR} SHOW_PROGRESS)
+    endif()
+    if(NOT EXISTS "${FFMPEG_DIR}")
+        message(STATUS "Extracting FFmpeg...")
+        file(MAKE_DIRECTORY "${CMAKE_SOURCE_DIR}/thirdparty")
+        execute_process(COMMAND ${CMAKE_COMMAND} -E tar xJf ${FFMPEG_TAR}
+                        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/thirdparty"
+                        COMMAND_ERROR_IS_FATAL ANY)
+        file(RENAME "${CMAKE_SOURCE_DIR}/thirdparty/ffmpeg-${FFMPEG_VER}" ${FFMPEG_DIR})
+    endif()
+
+    find_program(BASH bash)
+    if(NOT BASH)
+        message(FATAL_ERROR "bash not found. FFmpeg must be built from a POSIX shell (MSYS2).")
+    endif()
+
+    message(STATUS "Configuring FFmpeg (minimal AAC decoder)...")
+    execute_process(
+        COMMAND ${BASH} -c "./configure --disable-all --enable-avcodec --enable-avutil --enable-decoder=aac --enable-parser=aac --disable-doc --disable-programs --disable-network --disable-zlib --disable-bzlib --disable-lzma --disable-iconv --disable-xlib --disable-alsa --disable-sdl2 --disable-autodetect --disable-asm --disable-x86asm --target-os=mingw32 --arch=x86_64"
+        WORKING_DIRECTORY ${FFMPEG_DIR}
+        COMMAND_ERROR_IS_FATAL ANY
+    )
+
+    message(STATUS "Building FFmpeg...")
+    execute_process(
+        COMMAND ${CMAKE_MAKE_PROGRAM} -j4
+        WORKING_DIRECTORY ${FFMPEG_DIR}
+        COMMAND_ERROR_IS_FATAL ANY
+    )
+endif()
+
 # Source files
 set(SOURCES
     src/main.cpp
@@ -37,27 +78,21 @@ set(PLAYFAIR_SOURCES
     src/playfair/sap_hash.c
 )
 
-# Vendored Fraunhofer FDK AAC decoder (decoder libs only)
-file(GLOB FDK_AAC_DIRS "src/fdk-aac/*")
-set(FDK_AAC_SOURCES "")
-foreach(dir ${FDK_AAC_DIRS})
-    if(IS_DIRECTORY ${dir})
-        file(GLOB lib_srcs "${dir}/src/*.cpp")
-        list(APPEND FDK_AAC_SOURCES ${lib_srcs})
-    endif()
-endforeach()
+add_executable(lazyplay ${SOURCES} ${PLAYFAIR_SOURCES})
 
-add_executable(lazyplay ${SOURCES} ${PLAYFAIR_SOURCES} ${FDK_AAC_SOURCES})
+target_include_directories(lazyplay PRIVATE ${FFMPEG_DIR})
 
-# fdk-aac headers live in each library's include/ and src/ directories
-foreach(dir ${FDK_AAC_DIRS})
-    if(IS_DIRECTORY ${dir})
-        target_include_directories(lazyplay PRIVATE "${dir}/include" "${dir}/src")
-    endif()
-endforeach()
+# FFmpeg static libraries
+find_library(AVCODEC_LIB avcodec PATHS "${FFMPEG_DIR}/libavcodec" NO_DEFAULT_PATH)
+find_library(AVUTIL_LIB avutil PATHS "${FFMPEG_DIR}/libavutil" NO_DEFAULT_PATH)
+if(NOT AVCODEC_LIB OR NOT AVUTIL_LIB)
+    message(FATAL_ERROR "FFmpeg libraries not found in ${FFMPEG_DIR}")
+endif()
 
 # Windows System Libraries
 target_link_libraries(lazyplay PRIVATE
+    ${AVCODEC_LIB}
+    ${AVUTIL_LIB}
     ws2_32
     dnsapi
     d3d11
@@ -69,4 +104,5 @@ target_link_libraries(lazyplay PRIVATE
     gdi32
     ole32
     iphlpapi
+    bcrypt
 )
