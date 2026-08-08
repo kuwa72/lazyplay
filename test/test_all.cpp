@@ -723,6 +723,47 @@ static int TestE2E(const char* host, const char* path) {
     CHECK(sentPackets > 40, "streamed the video");
     CHECK(audioSetupDone, "audio SETUP was exercised mid-stream");
 
+    // Partial TEARDOWN of the audio stream only: the video session and the
+    // RTSP connection must survive (regression: this used to kill the session)
+    {
+        BPNode td = BPNode::MakeDict();
+        BPNode tstreams = BPNode::MakeArray();
+        BPNode tst = BPNode::MakeDict();
+        tst.Set("type", BPNode::MakeInt(96));
+        tstreams.Append(tst);
+        td.Set("streams", tstreams);
+        std::vector<uint8_t> tdBin = BPlistWrite(td);
+        RtspResponse tresp;
+        bool ok = RtspExchange(s, "TEARDOWN", "rtsp://127.0.0.1/1", cseq,
+                               "application/x-apple-binary-plist", tdBin, tresp);
+        CHECK(ok && tresp.status == 200, "partial TEARDOWN (audio) -> 200");
+
+        // video must still flow on the same data channel afterwards
+        bool stillFlowing = true;
+        for (int i = 0; i < 5; ++i) {
+            const auto& nal = nals[i % nals.size()];
+            if ((nal[0] & 0x1F) == 7 || (nal[0] & 0x1F) == 8) continue;
+            std::vector<uint8_t> plain;
+            PutBE32(plain, (uint32_t)nal.size());
+            plain.insert(plain.end(), nal.begin(), nal.end());
+            std::vector<uint8_t> cipher(plain.size());
+            aes.Process(plain.data(), cipher.data(), plain.size());
+            std::vector<uint8_t> packet(128, 0);
+            PutLE32(packet.data(), (uint32_t)cipher.size());
+            packet[4] = 0x00;
+            ts += 33333;
+            PutLE64(packet.data() + 8, ts);
+            packet.insert(packet.end(), cipher.begin(), cipher.end());
+            if (!SendAll(ds, packet.data(), packet.size())) { stillFlowing = false; break; }
+        }
+        CHECK(stillFlowing, "video data channel alive after partial teardown");
+
+        // and the RTSP connection must still answer requests
+        RtspResponse hresp;
+        bool hok = RtspExchange(s, "GET_PARAMETER", "rtsp://127.0.0.1/1", cseq, "", {}, hresp);
+        CHECK(hok && hresp.status == 200, "RTSP connection alive after partial teardown");
+    }
+
     // give the server a moment to decode/render, then verify it is still healthy
     Sleep(1500);
     SOCKET s2 = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);

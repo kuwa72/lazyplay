@@ -439,6 +439,17 @@ void RTSPServer::HandleSetup(SOCKET sock, const Request& req, const std::string&
                 resStreams.Append(resStream);
             } else if (type == 96) {
                 // Audio stream: accepted but discarded (sub-display specialization, REQUIREMENTS 2.4)
+                if (session.audioSink == INVALID_SOCKET) {
+                    // (Re)create the sink: audio can be torn down and re-added mid-session
+                    session.audioSink = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+                    if (session.audioSink != INVALID_SOCKET) {
+                        sockaddr_in addr = {};
+                        addr.sin_family = AF_INET;
+                        addr.sin_addr.s_addr = INADDR_ANY;
+                        addr.sin_port = 0;
+                        bind(session.audioSink, (struct sockaddr*)&addr, sizeof(addr));
+                    }
+                }
                 uint16_t audioPort = 0;
                 if (session.audioSink != INVALID_SOCKET) {
                     sockaddr_in bound = {};
@@ -463,37 +474,41 @@ void RTSPServer::HandleSetup(SOCKET sock, const Request& req, const std::string&
 }
 
 void RTSPServer::HandleTeardown(SOCKET sock, const Request& req, Session& session, bool& closeAfter) {
-    bool teardownAll = true;
+    // TEARDOWN carries a plist with the stream types to tear down. A partial
+    // teardown (e.g. audio only, type 96) must NOT end the session: macOS
+    // routinely adds and removes the audio stream while mirroring continues.
     BPNode reqRoot;
+    bool hasStreams = false;
     if (!req.body.empty() && BPlistParse(req.body.data(), req.body.size(), reqRoot)) {
         if (const BPNode* streams = reqRoot.Find("streams")) {
             if (streams->type == BPNode::Type::Array && !streams->array.empty()) {
-                teardownAll = false;
+                hasStreams = true;
                 for (const auto& stream : streams->array) {
                     uint64_t type = stream.FindInt("type", 0);
                     if (type == 110 && session.video) {
                         session.video->Stop();
                         session.video.reset();
                         std::cout << "[RTSP] Mirroring stream torn down." << std::endl;
-                    }
-                    if (type == 96 && session.audioSink != INVALID_SOCKET) {
-                        closesocket(session.audioSink);
-                        session.audioSink = INVALID_SOCKET;
+                    } else if (type == 96) {
+                        std::cout << "[RTSP] Audio stream torn down (video session continues)." << std::endl;
                     }
                 }
             }
         }
     }
 
-    if (teardownAll) {
+    if (!hasStreams) {
+        // Full session teardown: release everything; the client closes the connection.
         if (session.video) { session.video->Stop(); session.video.reset(); }
         if (session.ntp) { session.ntp->Stop(); session.ntp.reset(); }
         if (session.audioSink != INVALID_SOCKET) { closesocket(session.audioSink); session.audioSink = INVALID_SOCKET; }
         std::cout << "[RTSP] Session torn down." << std::endl;
+        SendEmptyOk(sock, req, { { "Connection", "close" } });
+        closeAfter = true;
+        return;
     }
 
-    SendEmptyOk(sock, req, { { "Connection", "close" } });
-    closeAfter = true;
+    SendEmptyOk(sock, req);
 }
 
 void RTSPServer::ProcessRequest(SOCKET clientSock, const Request& req, const std::string& clientIp,
