@@ -14,6 +14,25 @@ Mac の AirPlay ミラーリング機能を使い、低スペックな Windows �
 - **音声も同時再生**: AirPlay ミラーリング音声（AAC-ELD / 44.1 kHz ステレオ）を復号し、WASAPI でスピーカー出力
 - **ペアリング不要**: feature bit 27 を切ってあるため、Mac 側での PIN 入力なしに接続できます
 
+## Pros / Cons（メリット・デメリット）
+
+### Pros（メリット）
+
+- **Lightweight / 軽量**: Win32 + D3D11 native only; no Electron/Qt. A single portable `lazyplay.exe`.
+- **GPU hardware decode / GPU ハードウェアデコード**: H.264 decoded by D3D11 / DXVA2, easy on low-spec CPUs like Intel Atom.
+- **Low latency / 低遅延**: decoded frames are presented immediately.
+- **Audio support / 音声再生**: AirPlay mirroring audio (AAC-ELD 44.1 kHz stereo) decoded and played via WASAPI.
+- **No pairing required / ペアリング不要**: connects without a PIN on the Mac/iPhone side.
+- **Tablet-friendly / タブレット対応**: tap or long-press to open a control menu (toggle fullscreen, move to next display, exit).
+
+### Cons（デメリット）
+
+- **Windows only / Windows 専用**: requires Windows 10/11 x64.
+- **GPU-dependent / GPU 必須**: needs a D3D11 GPU with H.264 hardware decode; no software decode fallback.
+- **No DRM content / DRM 非対応**: Netflix and other DRM-protected content are blacked out on the sender side (Apple limitation, same as Apple TV).
+- **No AirPlay 2 / AirPlay 2 非対応**: H.265 and AirPlay 2 features are not implemented.
+- **No reverse control / 逆方向制御不可**: the receiver cannot send touch/keyboard input back to the Mac/iPhone. AirPlay mirroring is one-way.
+
 ## 使い方
 
 1. `lazyplay.exe` を起動すると全画面で開きます（`-window` でウィンドウ起動）
