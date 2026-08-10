@@ -57,6 +57,15 @@ static bool IsTap(int x, int y) {
     return std::abs(dx) <= TAP_MAX_PX && std::abs(dy) <= TAP_MAX_PX && elapsed <= TAP_MAX_MS;
 }
 
+static void PreventSystemSleep() {
+    // Keep the system awake and the display on while lazyplay is running.
+    SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED);
+}
+
+static void AllowSystemSleep() {
+    SetThreadExecutionState(ES_CONTINUOUS);
+}
+
 static void ShowControlMenu(HWND hwnd) {
     HMENU hMenu = CreatePopupMenu();
     if (!hMenu) return;
@@ -244,6 +253,9 @@ int main(int argc, char* argv[]) {
         renderer.ToggleFullscreen();
     }
 
+    // Keep the host awake while lazyplay is mirroring.
+    PreventSystemSleep();
+
     // Initialize D3D11 / DXVA2 Hardware H.264 Decoder (no software fallback, REQUIREMENTS 2.2)
     D3D11H264Decoder decoder;
     if (!decoder.Initialize(renderer.GetDevice())) {
@@ -348,6 +360,9 @@ int main(int argc, char* argv[]) {
     decoder.Shutdown();
     renderer.Cleanup();
     g_renderer = nullptr;
+
+    // Re-enable normal sleep/screen-off behavior.
+    AllowSystemSleep();
 
     return 0;
 }

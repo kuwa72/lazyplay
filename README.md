@@ -13,6 +13,7 @@ Mac の AirPlay ミラーリング機能を使い、低スペックな Windows �
 - **低遅延**: 受信→描画までを最小化（デコードしたフレームを即時 Present）
 - **音声も同時再生**: AirPlay ミラーリング音声（AAC-ELD / 44.1 kHz ステレオ）を復号し、WASAPI でスピーカー出力
 - **ペアリング不要**: feature bit 27 を切ってあるため、Mac 側での PIN 入力なしに接続できます
+- **スリープ防止**: 起動中は Windows のスリープ/画面オフを抑制
 
 ## Pros / Cons（メリット・デメリット）
 
@@ -24,6 +25,7 @@ Mac の AirPlay ミラーリング機能を使い、低スペックな Windows �
 - **Audio support / 音声再生**: AirPlay mirroring audio (AAC-ELD 44.1 kHz stereo) decoded and played via WASAPI.
 - **No pairing required / ペアリング不要**: connects without a PIN on the Mac/iPhone side.
 - **Tablet-friendly / タブレット対応**: tap or long-press to open a control menu (toggle fullscreen, move to next display, exit).
+- **Prevents sleep / スリープ防止**: keeps the host awake and the display on while mirroring.
 
 ### Cons（デメリット）
 
