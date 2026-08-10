@@ -42,10 +42,14 @@ Mac の AirPlay ミラーリング機能を使い、低スペックな Windows �
 
 **ファイアウォール**: AirPlay は内向き TCP 5000/7000（と mDNS UDP 5353）を使います。
 初回起動時に Windows ファイアウォールの許可ダイアログが出たら許可してください。
-Mac 側にデバイスは見えるのに接続だけできない場合はファイアウォールを確認してください
-（コントロール パネルの「許可されたアプリ」から追加するか、管理者権限で）:
+Mac/iPhone 側にデバイスは見えるのに接続だけできない場合はファイアウォールの設定を確認してください。
 
-```
+**推奨**: コントロール パネルの「Windows Defender ファイアウォール」→「許可されたアプリ」
+→「別のアプリの許可」から `lazyplay.exe` を追加してください。
+
+または管理者権限の PowerShell / コマンドプロンプトで:
+
+```powershell
 netsh advfirewall firewall add rule name="lazyplay" dir=in action=allow program="C:\path\to\lazyplay.exe" enable=yes profile=any
 ```
 
