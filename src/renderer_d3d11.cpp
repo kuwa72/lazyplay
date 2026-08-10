@@ -1,6 +1,7 @@
 #include "renderer_d3d11.h"
 #include <d3dcompiler.h>
 #include <iostream>
+#include <vector>
 
 #pragma comment(lib, "d3d11.lib")
 #pragma comment(lib, "d3dcompiler.lib")
@@ -91,7 +92,7 @@ bool D3D11Renderer::Initialize(HWND hwnd, uint32_t width, uint32_t height, bool 
 
     if (FAILED(hr)) {
         std::cerr << "[D3D11] Failed to create D3D11 Device and SwapChain. HR=0x"
-                  << std::hex << hr << std::endl;
+                  << std::hex << hr << std::dec << std::endl;
         return false;
     }
 
@@ -139,6 +140,16 @@ void D3D11Renderer::Resize(uint32_t width, uint32_t height) {
     m_presentForced = true;
 }
 
+static BOOL CALLBACK MonitorEnumProc(HMONITOR hMonitor, HDC /*hdc*/, LPRECT /*lprcMonitor*/, LPARAM dwData) {
+    auto* monitors = reinterpret_cast<std::vector<MONITORINFO>*>(dwData);
+    MONITORINFO mi = {};
+    mi.cbSize = sizeof(mi);
+    if (GetMonitorInfo(hMonitor, &mi)) {
+        monitors->push_back(mi);
+    }
+    return TRUE;
+}
+
 void D3D11Renderer::ToggleFullscreen() {
     if (!m_hwnd) return;
 
@@ -148,9 +159,12 @@ void D3D11Renderer::ToggleFullscreen() {
     if (m_isFullscreen) {
         GetWindowRect(m_hwnd, &m_windowedRect);
         SetWindowLong(m_hwnd, GWL_STYLE, dwStyle & ~WS_OVERLAPPEDWINDOW);
+
+        // Move to the monitor that currently contains the window.
+        HMONITOR hCurrent = MonitorFromWindow(m_hwnd, MONITOR_DEFAULTTOPRIMARY);
         MONITORINFO mi = {};
         mi.cbSize = sizeof(mi);
-        GetMonitorInfo(MonitorFromWindow(m_hwnd, MONITOR_DEFAULTTOPRIMARY), &mi);
+        GetMonitorInfo(hCurrent, &mi);
         SetWindowPos(m_hwnd, HWND_TOP,
             mi.rcMonitor.left, mi.rcMonitor.top,
             mi.rcMonitor.right - mi.rcMonitor.left,
@@ -164,6 +178,34 @@ void D3D11Renderer::ToggleFullscreen() {
             m_windowedRect.bottom - m_windowedRect.top,
             SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
     }
+}
+
+void D3D11Renderer::CycleFullscreenMonitor() {
+    if (!m_hwnd || !m_isFullscreen) return;
+
+    std::vector<MONITORINFO> monitors;
+    EnumDisplayMonitors(nullptr, nullptr, MonitorEnumProc, reinterpret_cast<LPARAM>(&monitors));
+    if (monitors.empty()) return;
+
+    // Find which monitor currently contains the window center.
+    RECT rc;
+    GetWindowRect(m_hwnd, &rc);
+    POINT center = { (rc.left + rc.right) / 2, (rc.top + rc.bottom) / 2 };
+    int current = 0;
+    for (size_t i = 0; i < monitors.size(); ++i) {
+        if (PtInRect(&monitors[i].rcMonitor, center)) {
+            current = static_cast<int>(i);
+            break;
+        }
+    }
+
+    int next = (current + 1) % static_cast<int>(monitors.size());
+    const MONITORINFO& mi = monitors[next];
+    SetWindowPos(m_hwnd, HWND_TOP,
+        mi.rcMonitor.left, mi.rcMonitor.top,
+        mi.rcMonitor.right - mi.rcMonitor.left,
+        mi.rcMonitor.bottom - mi.rcMonitor.top,
+        SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
 }
 
 void D3D11Renderer::SetDisplayHint(uint32_t width, uint32_t height) {
@@ -272,7 +314,7 @@ bool D3D11Renderer::EnsureVideoTexture(uint32_t width, uint32_t height) {
     HRESULT hr = m_device->CreateTexture2D(&texDesc, nullptr, &m_videoTexture);
     if (FAILED(hr)) {
         std::cerr << "[D3D11] Failed to create NV12 video texture (" << width << "x" << height
-                  << ") HR=0x" << std::hex << hr << std::endl;
+                  << ") HR=0x" << std::hex << hr << std::dec << std::endl;
         return false;
     }
 

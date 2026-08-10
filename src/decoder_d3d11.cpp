@@ -16,18 +16,18 @@ D3D11H264Decoder::~D3D11H264Decoder() {
 bool D3D11H264Decoder::Initialize(ID3D11Device* d3d11Device) {
     HRESULT hr = MFStartup(MF_VERSION);
     if (FAILED(hr)) {
-        std::cerr << "[Decoder] MFStartup failed: 0x" << std::hex << hr << std::endl;
+        std::cerr << "[Decoder] MFStartup failed: 0x" << std::hex << hr << std::dec << std::endl;
         return false;
     }
 
     if (d3d11Device) {
         hr = MFCreateDXGIDeviceManager(&m_resetToken, &m_dxgiManager);
         if (FAILED(hr)) {
-            std::cerr << "[Decoder] MFCreateDXGIDeviceManager failed: 0x" << std::hex << hr << std::endl;
+            std::cerr << "[Decoder] MFCreateDXGIDeviceManager failed: 0x" << std::hex << hr << std::dec << std::endl;
         } else {
             hr = m_dxgiManager->ResetDevice(d3d11Device, m_resetToken);
             if (FAILED(hr)) {
-                std::cerr << "[Decoder] DXGI Device Manager ResetDevice failed: 0x" << std::hex << hr << std::endl;
+                std::cerr << "[Decoder] DXGI Device Manager ResetDevice failed: 0x" << std::hex << hr << std::dec << std::endl;
                 m_dxgiManager.Reset();
             }
         }
@@ -59,7 +59,7 @@ bool D3D11H264Decoder::SetupMFT() {
     HRESULT hr = CoCreateInstance(CLSID_CMSH264DecoderMFT, nullptr, CLSCTX_INPROC_SERVER,
                                   IID_PPV_ARGS(&m_mftDecoder));
     if (FAILED(hr)) {
-        std::cerr << "[Decoder] H.264 decoder MFT not available: 0x" << std::hex << hr << std::endl;
+        std::cerr << "[Decoder] H.264 decoder MFT not available: 0x" << std::hex << hr << std::dec << std::endl;
         return false;
     }
 
@@ -85,7 +85,7 @@ bool D3D11H264Decoder::SetupMFT() {
 
     hr = m_mftDecoder->SetInputType(0, inputType.Get(), 0);
     if (FAILED(hr)) {
-        std::cerr << "[Decoder] SetInputType failed: 0x" << std::hex << hr << std::endl;
+        std::cerr << "[Decoder] SetInputType failed: 0x" << std::hex << hr << std::dec << std::endl;
         return false;
     }
 

@@ -17,8 +17,9 @@ Mac の AirPlay ミラーリング機能を使い、低スペックな Windows �
 ## 使い方
 
 1. `lazyplay.exe` を起動すると全画面で開きます（`-window` でウィンドウ起動）
-2. Mac と同一ネットワークに接続し、Mac の画面ミラーリングから `lazyplay-display` を選択
-3. 終了は 右クリック / タッチ長押し（または `Esc`/`Q`）、`Alt+Enter` で全画面/ウィンドウ切替
+2. Mac/iPhone と同一ネットワークに接続し、画面ミラーリングから `lazyplay-display` を選択
+3. タップ / 右クリック / タッチ長押しでメニュー（Toggle fullscreen / Move to next display / Exit）が開きます。終了は `Esc`/`Q` でも可能
+4. `Alt+Enter` で全画面/ウィンドウ切替、`Shift+Alt+Enter` で全画面を次のディスプレイへ移動
 
 **ファイアウォール**: AirPlay は内向き TCP 5000/7000（と mDNS UDP 5353）を使います。
 初回起動時に Windows ファイアウォールの許可ダイアログが出たら許可してください。

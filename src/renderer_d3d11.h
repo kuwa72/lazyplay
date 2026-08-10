@@ -19,6 +19,7 @@ public:
     void Cleanup();
     void Resize(uint32_t width, uint32_t height);
     void ToggleFullscreen();
+    void CycleFullscreenMonitor();
     bool IsFullscreen() const { return m_isFullscreen; }
 
     // Direct3D11 device access for DXVA decoder sharing

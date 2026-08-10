@@ -115,7 +115,7 @@ void WasapiPlayer::ThreadMain() {
     hr = client->Initialize(AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
                             bufferDuration, 0, mix, nullptr);
     if (FAILED(hr)) {
-        std::cerr << "[Audio] IAudioClient Initialize failed: 0x" << std::hex << hr << std::endl;
+        std::cerr << "[Audio] IAudioClient Initialize failed: 0x" << std::hex << hr << std::dec << std::endl;
         CoTaskMemFree(mix);
         CloseHandle(audioEvent);
         return;
@@ -134,7 +134,7 @@ void WasapiPlayer::ThreadMain() {
 
     hr = client->SetEventHandle(audioEvent);
     if (FAILED(hr)) {
-        std::cerr << "[Audio] SetEventHandle failed: 0x" << std::hex << hr << std::endl;
+        std::cerr << "[Audio] SetEventHandle failed: 0x" << std::hex << hr << std::dec << std::endl;
     }
 
     // 44.1k -> device rate linear resampler state

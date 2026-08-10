@@ -20,7 +20,8 @@ Lightweight AirPlay mirroring receiver for Windows (Win32 + D3D11 + Media Founda
 - Video key/IV = SHA-512("AirPlayStreamKey"<decimal streamConnectionID> + audioAesKey)[0:16] (same for "AirPlayStreamIV").
 - `ntp_timing.cpp` — timingProtocol=NTP: sends 32-byte requests to the client timing port every 3 s.
 - `decoder_d3d11.cpp` — MS H.264 MFT, low-latency mode, D3D11 NV12 texture output (no software fallback by design, REQUIREMENTS 2.2).
-- `renderer_d3d11.cpp` — NV12→RGB (BT.601 limited) pixel shader, aspect-preserved letterbox, Alt+Enter fullscreen, Esc/Q quit.
+- `renderer_d3d11.cpp` — NV12→RGB (BT.601 limited) pixel shader, aspect-preserved letterbox, Alt+Enter fullscreen, Shift+Alt+Enter cycles fullscreen across displays, Esc/Q quit.
+- `main.cpp` — WindowProc: tap / right-click / long-press opens a control menu (Toggle fullscreen / Move to next display / Exit); Esc/Q quits; Alt+Enter toggles fullscreen; Shift+Alt+Enter moves fullscreen to the next display.
 - `audio_stream.cpp` — RTP/UDP type-96 receiver: AES-128-CBC per-packet decrypt (per-packet IV reset, partial tail passthrough), duplicate elimination, jitter buffer, FFmpeg AAC-ELD decode → 44.1 kHz s16 stereo PCM.
 - `audio_decoder.cpp` — wrapper around FFmpeg's native `libavcodec` AAC decoder (LGPL) for AAC-ELD.
 - `audio_wasapi.cpp` — WASAPI shared-mode render thread, resampling to the mix format and volume dB → linear gain.

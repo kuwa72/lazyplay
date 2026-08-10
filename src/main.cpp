@@ -1,10 +1,12 @@
 #include <winsock2.h>
 #include <windows.h>
+#include <windowsx.h>
 #include <iostream>
 #include <string>
 #include <vector>
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 
 #include "renderer_d3d11.h"
 #include "decoder_d3d11.h"
@@ -29,6 +31,63 @@ std::string SanitizeHostLabel(const std::string& name) {
 
 } // namespace
 
+#define IDM_TOGGLE_FULLSCREEN 1001
+#define IDM_MONITOR_NEXT     1002
+#define IDM_APP_EXIT         1003
+
+// Simple tap detection for tablet control. A quick press/release with little
+// movement is treated as a tap and opens the control menu.
+static struct {
+    bool active = false;
+    POINT startPos = {0, 0};
+    std::chrono::steady_clock::time_point startTime;
+} g_tapState;
+
+static constexpr int TAP_MAX_PX = 10;
+static constexpr int TAP_MAX_MS = 300;
+static std::chrono::steady_clock::time_point g_lastMenuTime;
+static constexpr int MENU_COOLDOWN_MS = 100;
+
+static bool IsTap(int x, int y) {
+    if (!g_tapState.active) return false;
+    int dx = x - g_tapState.startPos.x;
+    int dy = y - g_tapState.startPos.y;
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                       std::chrono::steady_clock::now() - g_tapState.startTime).count();
+    return std::abs(dx) <= TAP_MAX_PX && std::abs(dy) <= TAP_MAX_PX && elapsed <= TAP_MAX_MS;
+}
+
+static void ShowControlMenu(HWND hwnd) {
+    HMENU hMenu = CreatePopupMenu();
+    if (!hMenu) return;
+
+    AppendMenuW(hMenu, MF_STRING, IDM_TOGGLE_FULLSCREEN, L"Toggle fullscreen");
+    UINT monitorEnabled = (g_renderer && g_renderer->IsFullscreen()) ? MF_ENABLED : MF_GRAYED;
+    AppendMenuW(hMenu, MF_STRING | monitorEnabled, IDM_MONITOR_NEXT, L"Move to next display");
+    AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(hMenu, MF_STRING, IDM_APP_EXIT, L"Exit");
+
+    POINT pt;
+    GetCursorPos(&pt);
+    g_lastMenuTime = std::chrono::steady_clock::now();
+    int cmd = static_cast<int>(TrackPopupMenu(hMenu, TPM_RIGHTBUTTON | TPM_RETURNCMD | TPM_NONOTIFY,
+                                              pt.x, pt.y, 0, hwnd, nullptr));
+    DestroyMenu(hMenu);
+    g_lastMenuTime = std::chrono::steady_clock::now();
+
+    switch (cmd) {
+    case IDM_TOGGLE_FULLSCREEN:
+        if (g_renderer) g_renderer->ToggleFullscreen();
+        break;
+    case IDM_MONITOR_NEXT:
+        if (g_renderer) g_renderer->CycleFullscreenMonitor();
+        break;
+    case IDM_APP_EXIT:
+        PostQuitMessage(0);
+        break;
+    }
+}
+
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     switch (uMsg) {
     case WM_SIZE:
@@ -46,15 +105,39 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         }
         if (wParam == VK_RETURN && (GetKeyState(VK_MENU) & 0x8000)) { // Alt + Enter
             if (g_renderer) {
-                g_renderer->ToggleFullscreen();
+                if (GetKeyState(VK_SHIFT) & 0x8000) {
+                    g_renderer->CycleFullscreenMonitor();
+                } else {
+                    g_renderer->ToggleFullscreen();
+                }
             }
             return 0;
         }
         break;
 
+    case WM_LBUTTONDOWN:
+        g_tapState.active = true;
+        g_tapState.startPos.x = GET_X_LPARAM(lParam);
+        g_tapState.startPos.y = GET_Y_LPARAM(lParam);
+        g_tapState.startTime = std::chrono::steady_clock::now();
+        return 0;
+
+    case WM_LBUTTONUP: {
+        bool wasTap = g_tapState.active && IsTap(GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
+        g_tapState.active = false;
+        if (wasTap) {
+            auto sinceMenu = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                 std::chrono::steady_clock::now() - g_lastMenuTime).count();
+            if (sinceMenu > MENU_COOLDOWN_MS) {
+                ShowControlMenu(hwnd);
+            }
+        }
+        return 0;
+    }
+
     case WM_RBUTTONUP:
-        // Keyboard-less (tablet) exit path: right-click / touch long-press quits
-        PostQuitMessage(0);
+        // Keyboard-less (tablet) control path: right-click / touch long-press opens menu
+        ShowControlMenu(hwnd);
         return 0;
 
     case WM_SETCURSOR:
@@ -114,7 +197,9 @@ int main(int argc, char* argv[]) {
     std::cout << "  lazyplay - Lightweight AirPlay Receiver " << std::endl;
     std::cout << "  Device Name: " << deviceName << std::endl;
     std::cout << "  Target Resolution: " << width << "x" << height << " @" << targetFps << "fps" << std::endl;
-    std::cout << "  Quit: right-click / long-press (or Esc)" << std::endl;
+    std::cout << "  Tap / right-click / long-press: control menu (Toggle fullscreen / Move display / Exit)" << std::endl;
+    std::cout << "  Quit: Esc / Q / control menu -> Exit" << std::endl;
+    std::cout << "  Alt+Enter: fullscreen toggle | Shift+Alt+Enter: move fullscreen to next display" << std::endl;
     std::cout << "==========================================" << std::endl;
 
     // Register Win32 Window Class
