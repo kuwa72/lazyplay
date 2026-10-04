@@ -1,87 +1,89 @@
-# ソフトウェア要件定義書 (REQUIREMENTS.md)
+# Software Requirements Specification (REQUIREMENTS.md)
 
-## 1. 基本概要
+*[日本語版はこちら / Japanese version](REQUIREMENTS.ja.md)*
 
-* **プロジェクト名**: lazyplay
-* **目的**: MacのAirPlayミラーリング機能を利用し、低スペックなWindows端末（Intel Atom系CPU等）をワイヤレスサブディスプレイ（拡張・複製画面）として活用する軽量AirPlayレシーバー。
-* **対象プラットフォーム**: Windows 10 / 11 (x86/x64)
-* **開発言語・技術スタック**:
-  * 言語: C / C++ (C11 / C++17)
-  * レンダリング・デコード API: Direct3D 11 / DXVA2 / Windows Media Foundation (DirectX Hardware Acceleration)
-  * ネットワーク: WinSock2 / Windows DNS Service Discovery (mDNS / Bonjour)
-  * 音声デコード: FFmpeg のネイティブ AAC デコーダ（LGPL、初回ビルド時に thirdparty/ へダウンロード・ビルド）
-  * 音声出力: WASAPI 共有モード
-  * ベース参考実装: UxPlay / RPiPlay 等のオープンソースAirPlayレシーバーアーキテクチャ
+## 1. Overview
 
----
-
-## 2. 機能要件
-
-### 2.1. AirPlay 受信 & ネットワークプロトコル
-* **mDNS アナウンス (Bonjour)**:
-  * `_airplay._tcp.local` (Port 7000) および `_raop._tcp.local` (Port 5000) のサービス公開。
-  * デバイス名指定機能（例: `lazyplay-display`）。
-* **RTSP ハンドシェイク & セッション管理**:
-  * `ANNOUNCE`, `SETUP`, `RECORD`, `TEARDOWN`, `SET_PARAMETER` 等のRTSPシーケンス処理。
-  * Pair-Setup / Pair-Verify ハンドシェイク（必要に応じて暗号化鍵交換）。
-* **PTP / NTP 時刻同期**:
-  * 映像同期用タイムスタンプの取得とラグ補正。
-
-### 2.2. ハードウェアアクセラレーション（必須）
-* **DirectX / DXVA2 (D3D11 Video) H.264 デコード**:
-  * Intel Atom内蔵GPU (Intel HD Graphics) に対応した H.264 ハードウェアデコーダーを直接駆動。
-  * ソフトウェアデコード（FFmpeg/CPU）へのフォールバックを防止し、CPU使用率を極限まで低減。
-  * デコード済みフレームを Direct3D11 スワップチェーンへゼロコピー（または低グラフィックバス負荷）で転送・描画。
-
-### 2.3. 解像度 & フレームレート制御
-* **解像度指定**:
-  * ネゴシエーション時にMac側へ要求する画面解像度の設定（デフォルト: 1280x720p、オプションで 1920x1080p）。
-* **リフレッシュレート（フレームレート）制限**:
-  * 30fps / 60fps の上限固定機能（コマンドライン引数または設定ファイル指定）。
-  * ドロップフレーム処理による遅延・バッファ蓄積の防止。
-
-### 2.4. 音声処理
-* **AirPlay ミラーリング音声の受信・再生**:
-  * ストリームタイプ 96 (AAC-ELD / 44.1 kHz ステレオ) を RTP/UDP で受信。
-  * AES-128-CBC で復号（パケットごとに IV リセット、末尾の部分ブロックは平文）。
-  * FFmpeg のネイティブ AAC デコーダ（LGPL）で AAC-ELD を 44.1 kHz s16 ステレオ PCM にデコード。
-  * WASAPI 共有モードでスピーカー出力し、Mac 側の AirPlay 音量 (`SET_PARAMETER volume`) を反映。
-
-### 2.5. ミニマル GUI / CLI 画面
-* **ウィンドウ表示**:
-  * Borderless Fullscreen (ボーダレス全画面) または ウインドウ表示モード。
-  * トレイアイコン常駐機能（オプション）。
-* **ショートカットキー**:
-  * `Alt + Enter`: 全画面/ウィンドウ切替
-  * `Esc` または `Q`: アプリ終了
-  * 右クリック / タッチ長押し: アプリ終了（キーボード無し運用向け）
-  * 全画面時はマウスカーソル非表示
-* **コマンドラインオプション**:
-  * `-name <deviceName>`: 表示デバイス名
-  * `-fps <30|60>`: 最大フレームレート
-  * `-res <720p|1080p>`: 受信解像度（デフォルト 1080p）
-  * `-vsync <0|1>`: 垂直同期設定
-  * `-window`: ウィンドウモードで起動（デフォルトはボーダレス全画面）
+* **Project name**: lazyplay
+* **Purpose**: A lightweight AirPlay receiver that uses macOS's AirPlay mirroring to turn a low-spec Windows PC (e.g. Intel Atom class CPU) into a wireless sub-display (extended or mirrored screen).
+* **Target platform**: Windows 10 / 11 (x86/x64)
+* **Language / tech stack**:
+  * Language: C / C++ (C11 / C++17)
+  * Rendering / decode APIs: Direct3D 11 / DXVA2 / Windows Media Foundation (DirectX Hardware Acceleration)
+  * Networking: WinSock2 / Windows DNS Service Discovery (mDNS / Bonjour)
+  * Audio decode: FFmpeg's native AAC decoder (LGPL; downloaded and built into thirdparty/ on first build)
+  * Audio output: WASAPI shared mode
+  * Reference implementation: open-source AirPlay receiver architectures such as UxPlay / RPiPlay
 
 ---
 
-## 3. 非機能要件
+## 2. Functional requirements
 
-* **CPU / メモリ占有率の最小化**:
-  * CPU利用率: 低スペックAtom環境（2コア/4スレッド等）において10%以下を目標。
-  * メモリ使用量: 50MB以下を維持。
-* **低遅延（Low Latency）**:
-  * 受信から画面描画までのレイテンシを約 50〜100ms 以下に抑えるジッターバッファ制御。
-* **ビルド & 依存関係の最小化**:
-  * 重いサードパーティ UI ライブラリ（Electron, Qt 等）を一切排除し、Win32 API Native + Direct3D + WASAPI + FFmpeg（必要最低限の AAC デコーダのみ）で軽量ビルドを実現。
+### 2.1. AirPlay reception & network protocol
+* **mDNS announcement (Bonjour)**:
+  * Advertise `_airplay._tcp.local` (port 7000) and `_raop._tcp.local` (port 5000).
+  * Configurable device name (e.g. `lazyplay-display`).
+* **RTSP handshake & session management**:
+  * Handle RTSP sequences such as `ANNOUNCE`, `SETUP`, `RECORD`, `TEARDOWN`, `SET_PARAMETER`.
+  * Pair-Setup / Pair-Verify handshake (encryption key exchange as needed).
+* **PTP / NTP time sync**:
+  * Acquire timestamps for video sync and compensate for lag.
+
+### 2.2. Hardware acceleration (required)
+* **DirectX / DXVA2 (D3D11 Video) H.264 decode**:
+  * Drive the H.264 hardware decoder built into Intel Atom integrated GPUs (Intel HD Graphics) directly.
+  * No fallback to software decode (FFmpeg/CPU), keeping CPU usage as low as possible.
+  * Transfer decoded frames to the Direct3D11 swap chain with zero-copy (or minimal graphics-bus load) rendering.
+
+### 2.3. Resolution & frame-rate control
+* **Resolution selection**:
+  * Configure the screen resolution requested from the Mac during negotiation (default: 1280x720p; 1920x1080p optional).
+* **Refresh-rate (frame-rate) cap**:
+  * Fixed cap of 30 fps / 60 fps (via command-line argument or config file).
+  * Drop-frame handling to prevent latency buildup and buffer accumulation.
+
+### 2.4. Audio processing
+* **AirPlay mirroring audio reception & playback**:
+  * Receive stream type 96 (AAC-ELD / 44.1 kHz stereo) over RTP/UDP.
+  * Decrypt with AES-128-CBC (IV reset per packet; trailing partial block passed through as plaintext).
+  * Decode AAC-ELD to 44.1 kHz s16 stereo PCM with FFmpeg's native AAC decoder (LGPL).
+  * Output to speakers in WASAPI shared mode, honoring the Mac's AirPlay volume (`SET_PARAMETER volume`).
+
+### 2.5. Minimal GUI / CLI
+* **Window display**:
+  * Borderless fullscreen or windowed mode.
+  * Optional tray icon.
+* **Shortcut keys**:
+  * `Alt + Enter`: toggle fullscreen/windowed
+  * `Esc` or `Q`: quit
+  * Tap / right-click / touch-and-hold: show control menu (Toggle fullscreen / Move to next display / Exit; for keyboardless operation)
+  * Mouse cursor hidden in fullscreen
+* **Command-line options**:
+  * `-name <deviceName>`: displayed device name
+  * `-fps <30|60>`: maximum frame rate
+  * `-res <720p|1080p>`: receive resolution (default 1080p)
+  * `-vsync <0|1>`: vertical sync
+  * `-window`: start windowed (default is borderless fullscreen)
 
 ---
 
-## 4. 今後の開発ロードマップ
+## 3. Non-functional requirements
 
-1. **フェーズ 1**: 要件定義・仕様のフィナライズと設計文書の整理
-2. **フェーズ 2**: mDNS アナウンス & RTSP ハンドシェイクのモック作成
-3. **フェーズ 3**: H.264 ストリーム受信 & DXVA2/D3D11 デコードパイプラインの実装
-4. **フェーズ 4**: 解像度・FPS制御 & ウィンドウ/全画面化
-5. **フェーズ 5**: AirPlay ミラーリング音声 (AAC-ELD) の受信・復号・WASAPI 再生
-6. **フェーズ 6**: パフォーマンスチューニング (Atom 実機検証・メモリ最適化)
+* **Minimize CPU / memory usage**:
+  * CPU usage: target under 10% on a low-spec Atom machine (e.g. 2 cores / 4 threads).
+  * Memory usage: keep under 50 MB.
+* **Low latency**:
+  * Jitter-buffer control to keep receive-to-render latency at roughly 50–100 ms or less.
+* **Minimize build & dependencies**:
+  * Exclude all heavy third-party UI libraries (Electron, Qt, etc.) and achieve a lightweight build with Win32 API native + Direct3D + WASAPI + FFmpeg (only the minimal AAC decoder needed).
+
+---
+
+## 4. Development roadmap
+
+1. **Phase 1**: Finalize requirements and organize design documents
+2. **Phase 2**: Mock up mDNS announcement & RTSP handshake
+3. **Phase 3**: Implement H.264 stream reception & DXVA2/D3D11 decode pipeline
+4. **Phase 4**: Resolution / FPS control & windowed/fullscreen switching
+5. **Phase 5**: Receive, decrypt, and play AirPlay mirroring audio (AAC-ELD) via WASAPI
+6. **Phase 6**: Performance tuning (Atom real-device validation, memory optimization)
