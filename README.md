@@ -1,121 +1,103 @@
 # lazyplay
 
-Mac の AirPlay ミラーリング機能を使い、低スペックな Windows 端末（Intel Atom 系など）を
-ワイヤレス・サブディスプレイ化する軽量 AirPlay レシーバーです。
+*[日本語版はこちら / Japanese version](README.ja.md)*
 
-*Turn a low-spec Windows PC (e.g. Intel Atom) into a wireless sub-display for your Mac via AirPlay mirroring.*
+A lightweight AirPlay mirroring receiver that turns a low-spec Windows PC
+(e.g. Intel Atom) into a wireless sub-display for your Mac, using macOS's
+built-in AirPlay screen mirroring.
 
-## 特徴
+## Features
 
-- **GPU ハードウェアデコード (DXVA2/D3D11)**: H.264 を CPU ではなく GPU でデコード。
-  ソフトウェアデコードへのフォールバックは意図的に持たない設計です
-- **Win32 + Direct3D11 ネイティブのみ**: Electron/Qt 等の重い依存なし。単一 exe で持ち運び可能
-- **低遅延**: 受信→描画までを最小化（デコードしたフレームを即時 Present）
-- **音声も同時再生**: AirPlay ミラーリング音声（AAC-ELD / 44.1 kHz ステレオ）を復号し、WASAPI でスピーカー出力
-- **ペアリング不要**: feature bit 27 を切ってあるため、Mac 側での PIN 入力なしに接続できます
-- **スリープ防止**: 起動中は Windows のスリープ/画面オフを抑制
+- **GPU hardware decode (DXVA2/D3D11)**: H.264 is decoded on the GPU, not the CPU.
+  No software-decode fallback by design.
+- **Win32 + Direct3D11 native only**: no Electron/Qt or other heavy dependencies. A single portable `lazyplay.exe`.
+- **Low latency**: minimizes the path from receive to render (decoded frames are presented immediately).
+- **Audio playback**: decodes AirPlay mirroring audio (AAC-ELD / 44.1 kHz stereo) and plays it back via WASAPI.
+- **No pairing required**: feature bit 27 is disabled, so the Mac/iPhone connects without a PIN prompt.
+- **Prevents sleep**: keeps the host awake and the display on while mirroring.
 
-## Pros / Cons（メリット・デメリット）
+## Usage
 
-### Pros（メリット）
+1. Launch `lazyplay.exe` to start in fullscreen (use `-window` to start windowed instead).
+2. Connect your Mac/iPhone to the same network, open Screen Mirroring, and select `lazyplay-display`.
+3. Tap / right-click / touch-and-hold opens a control menu (Toggle fullscreen / Move to next display / Exit). You can also quit with `Esc`/`Q`.
+4. `Alt+Enter` toggles fullscreen/windowed mode; `Shift+Alt+Enter` moves fullscreen to the next display.
 
-- **Lightweight / 軽量**: Win32 + D3D11 native only; no Electron/Qt. A single portable `lazyplay.exe`.
-- **GPU hardware decode / GPU ハードウェアデコード**: H.264 decoded by D3D11 / DXVA2, easy on low-spec CPUs like Intel Atom.
-- **Low latency / 低遅延**: decoded frames are presented immediately.
-- **Audio support / 音声再生**: AirPlay mirroring audio (AAC-ELD 44.1 kHz stereo) decoded and played via WASAPI.
-- **No pairing required / ペアリング不要**: connects without a PIN on the Mac/iPhone side.
-- **Tablet-friendly / タブレット対応**: tap or long-press to open a control menu (toggle fullscreen, move to next display, exit).
-- **Prevents sleep / スリープ防止**: keeps the host awake and the display on while mirroring.
+**Firewall**: AirPlay uses inbound TCP 5000/7000 (and mDNS UDP 5353). If a
+Windows Firewall prompt appears on first launch, allow access. If your
+Mac/iPhone can see the device but cannot connect, check your firewall
+settings.
 
-### Cons（デメリット）
+**Recommended**: in Control Panel, go to "Windows Defender Firewall" →
+"Allowed apps" → "Change settings" / "Allow another app" and add
+`lazyplay.exe`.
 
-- **Windows only / Windows 専用**: requires Windows 10/11 x64.
-- **GPU-dependent / GPU 必須**: needs a D3D11 GPU with H.264 hardware decode; no software decode fallback.
-- **No DRM content / DRM 非対応**: Netflix and other DRM-protected content are blacked out on the sender side (Apple limitation, same as Apple TV).
-- **No AirPlay 2 / AirPlay 2 非対応**: H.265 and AirPlay 2 features are not implemented.
-- **No reverse control / 逆方向制御不可**: the receiver cannot send touch/keyboard input back to the Mac/iPhone. AirPlay mirroring is one-way.
+### Command-line options
 
-## 使い方
-
-1. `lazyplay.exe` を起動すると全画面で開きます（`-window` でウィンドウ起動）
-2. Mac/iPhone と同一ネットワークに接続し、画面ミラーリングから `lazyplay-display` を選択
-3. タップ / 右クリック / タッチ長押しでメニュー（Toggle fullscreen / Move to next display / Exit）が開きます。終了は `Esc`/`Q` でも可能
-4. `Alt+Enter` で全画面/ウィンドウ切替、`Shift+Alt+Enter` で全画面を次のディスプレイへ移動
-
-**ファイアウォール**: AirPlay は内向き TCP 5000/7000（と mDNS UDP 5353）を使います。
-初回起動時に Windows ファイアウォールの許可ダイアログが出たら許可してください。
-Mac/iPhone 側にデバイスは見えるのに接続だけできない場合はファイアウォールの設定を確認してください。
-
-**推奨**: コントロール パネルの「Windows Defender ファイアウォール」→「許可されたアプリ」
-→「別のアプリの許可」から `lazyplay.exe` を追加してください。
-
-または管理者権限の PowerShell / コマンドプロンプトで:
-
-```powershell
-netsh advfirewall firewall add rule name="lazyplay" dir=in action=allow program="C:\path\to\lazyplay.exe" enable=yes profile=any
-```
-
-### コマンドラインオプション
-
-| オプション | 説明 | デフォルト |
+| Option | Description | Default |
 |---|---|---|
-| `-name <name>` | AirPlay 上の表示デバイス名 | `lazyplay-display` |
-| `-fps <30\|60>` | 最大フレームレート | `30` |
-| `-res <720p\|1080p>` | 受信解像度 | `1080p` |
-| `-vsync <0\|1>` | 垂直同期 | `1` |
-| `-window` | 全画面ではなくウィンドウで起動 | off（全画面がデフォルト） |
+| `-name <name>` | AirPlay device name shown to senders | `lazyplay-display` |
+| `-fps <30\|60>` | Maximum frame rate | `30` |
+| `-res <720p\|1080p>` | Receive resolution | `1080p` |
+| `-vsync <0\|1>` | Vertical sync | `1` |
+| `-window` | Start windowed instead of fullscreen | off (fullscreen is the default) |
 
-* 描画は Per-Monitor-V2 DPI aware のため、Windows の表示スケーリング（125% 等）下でも
-  物理ピクセルに 1:1 で描画されます。デフォルトの全画面起動でパネル解像度と一致すれば
-  ドットバイドット表示になります（ウィンドウモードでは枠・タイトルバー分だけ領域が減ります）。
-* キーボード無しのタブレット運用を想定: 終了は右クリック / タッチ長押しです。
-  全画面時はマウスカーソルも非表示になります。
-* Netflix 等の DRM 保護コンテンツはミラーリング画像に含まれません（macOS 側で黒化される
-  仕様。Apple TV 等でも同様の制約があります）。
+* Rendering is Per-Monitor-V2 DPI aware, so the video is drawn 1:1 to
+  physical pixels even under Windows display scaling (e.g. 125%). When the
+  default fullscreen start matches the panel resolution, this gives a
+  dot-by-dot display (windowed mode loses some area to the border/title bar).
+* Designed for keyboardless tablet use: use tap / right-click / touch-and-hold
+  to open the control menu. The mouse cursor is also hidden in fullscreen.
+* DRM-protected content (e.g. Netflix) is not included in the mirrored
+  image — this is blacked out on the macOS side by Apple's own restriction,
+  the same limitation that applies to Apple TV.
 
-## ビルド
+## Build
 
-Windows 上の MinGW-w64 (gcc/g++) / MSYS2 (UCRT64) で:
+On Windows with MinGW-w64 (gcc/g++) / MSYS2 (UCRT64):
 
 ```
-make            # lazyplay.exe（初回は FFmpeg ソースもダウンロード・ビルド）
-make test       # ユニットテスト (SHA-512 / AES-CTR / AES-CBC / bplist / WASAPI)
+make            # builds lazyplay.exe (downloads and builds FFmpeg on first run)
+make test       # unit tests (SHA-512 / AES-CTR / AES-CBC / bplist / WASAPI)
 ```
 
-統合テスト（実 H.264 ストリームのデコード＆描画検証 / プロトコル E2E）:
+Integration tests (real H.264 stream decode & render verification / protocol E2E):
 
 ```
 ./test/test_all.exe decode test/test.h264
-./lazyplay.exe &                      # 別プロセスで起動
+./lazyplay.exe &                      # launch in a separate process
 ./test/test_all.exe e2e 127.0.0.1 test/test.h264
 ```
 
 ```
-./test/test_all.exe wasapi   # 440 Hz サイン波が鳴る簡易再生テスト
+./test/test_all.exe wasapi   # simple playback test; you should hear a 440 Hz tone
 ```
 
-MSVC は FFmpeg ソースビルドに未対応のため、MSYS2 UCRT64 + `make` を推奨します。`CMakeLists.txt` は MinGW-w64 用に FFmpeg 自動ビルドを含みます。
+MSVC does not support building FFmpeg from source, so MSYS2 UCRT64 +
+`make` is recommended. `CMakeLists.txt` includes automatic FFmpeg builds
+for MinGW-w64.
 
-## 動作環境
+## Requirements
 
 - Windows 10 / 11 (x64)
-- D3D11 + H.264 ハードウェアデコード対応 GPU（Intel HD Graphics 等）
-- macOS 側からの画面ミラーリング（同一 L2 ネットワーク、mDNS 到達が必要）
+- A GPU with D3D11 + H.264 hardware decode support (e.g. Intel HD Graphics)
+- Screen mirroring from macOS (same L2 network, mDNS reachability required)
 
-## 技術構成
+## Technical overview
 
-- mDNS アナウンス (`_airplay._tcp` / `_raop._tcp`)、RTSP+plist セッション、
-  FairPlay SAP 鍵交換、AES-128-CTR 映像復号、NTP タイミング — プロトコルは
-  [UxPlay](https://github.com/FDH2/UxPlay) / RPiPlay の実装を参照しています
-- FairPlay 部分は UxPlay 同梱の `playfair` を vendoring (`src/playfair/`)
-- 音声は RTP/UDP (stream type 96) を AES-128-CBC で復号し、
-  FFmpeg のネイティブ AAC デコーダ（LGPL）で AAC-ELD を PCM にデコード、
-  WASAPI 共有モードで再生
+- mDNS announcement (`_airplay._tcp` / `_raop._tcp`), RTSP+plist session,
+  FairPlay SAP key exchange, AES-128-CTR video decryption, NTP timing — the
+  protocol implementation is based on [UxPlay](https://github.com/FDH2/UxPlay) / RPiPlay.
+- The FairPlay part vendors UxPlay's bundled `playfair` (`src/playfair/`).
+- Audio is RTP/UDP (stream type 96), decrypted with AES-128-CBC, decoded
+  from AAC-ELD to PCM by FFmpeg's native AAC decoder (LGPL), and played
+  back in WASAPI shared mode.
 
 ## License
 
-GPLv3 — `playfair` (FairPlay SAP) を vendoring している関係上、本プロジェクト全体も GPLv3 で公開します。
-See [LICENSE](LICENSE).
+GPLv3 — because this project vendors `playfair` (FairPlay SAP), the whole
+project is published under GPLv3. See [LICENSE](LICENSE).
 
-FFmpeg は初回ビルド時に `thirdparty/` にダウンロード・ビルドされます。`libavcodec` の
-ネイティブ AAC デコーダは LGPL-2.1-or-later で、GPLv3 とのリンクが可能です。
+FFmpeg is downloaded and built into `thirdparty/` on first build.
+`libavcodec`'s native AAC decoder is LGPL-2.1-or-later, which can be linked
+against GPLv3 code.
