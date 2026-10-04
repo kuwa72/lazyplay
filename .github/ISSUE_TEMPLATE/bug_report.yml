@@ -1,0 +1,46 @@
+name: Connection or playback problem
+description: Report discovery, connection, video or audio failures.
+title: "[Problem] "
+body:
+  - type: markdown
+    attributes:
+      value: "Describe your setup below. Remove personal information from logs and screenshots; do not upload private recordings."
+  - type: input
+    id: version
+    attributes:
+      label: lazyplay version
+      description: Release tag, or commit/build details if built locally.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Receiver and sender environment
+      description: Windows version/build, PC model, GPU, sender model and iOS/iPadOS/macOS version; note unknown values.
+    validations:
+      required: true
+  - type: dropdown
+    id: stage
+    attributes:
+      label: Where does it fail?
+      options:
+        - Device not discovered
+        - Discovered but cannot connect
+        - Connected but no video
+        - Video works but no audio
+        - Stuttering or disconnecting
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps, expected behavior and actual behavior
+      description: Include launch options, Screen Mirroring steps and troubleshooting already tried. State whether the issue repeats.
+    validations:
+      required: true
+  - type: textarea
+    id: network
+    attributes:
+      label: Network and logs
+      description: Describe Wi-Fi/Ethernet, guest-network isolation, VPN and firewall app permission if known. Include relevant redacted log lines, not addresses or personal data.

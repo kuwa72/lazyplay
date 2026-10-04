@@ -42,7 +42,7 @@ jobs:
         shell: pwsh
         run: |
           strip lazyplay.exe
-          Compress-Archive -Path lazyplay.exe, README.md, LICENSE -DestinationPath lazyplay-win-x64.zip
+          Compress-Archive -Path lazyplay.exe, README.md, README.ja.md, LICENSE, assets -DestinationPath lazyplay-win-x64.zip
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
