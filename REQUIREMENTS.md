@@ -56,7 +56,8 @@
 * **Shortcut keys**:
   * `Alt + Enter`: toggle fullscreen/windowed
   * `Esc` or `Q`: quit
-  * Tap / right-click / touch-and-hold: show control menu (Toggle fullscreen / Move to next display / Exit; for keyboardless operation)
+  * Tap / right-click / touch-and-hold: show control menu (Toggle fullscreen / Move to next display / Audio output / Exit; for keyboardless operation)
+  * Audio output submenu: `System default` follows the Windows default playback device; other entries pin output to that device (silent while unplugged, resumes on return; choice persisted in the registry)
   * Mouse cursor hidden in fullscreen
 * **Command-line options**:
   * `-name <deviceName>`: displayed device name
@@ -64,6 +65,7 @@
   * `-res <720p|1080p>`: receive resolution (default 1080p)
   * `-vsync <0|1>`: vertical sync
   * `-window`: start windowed (default is borderless fullscreen)
+  * `-console` / `--console`: attach a console for diagnostic logs (default: no console)
 
 ---
 

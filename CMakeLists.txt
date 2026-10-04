@@ -79,7 +79,7 @@ set(PLAYFAIR_SOURCES
     src/playfair/sap_hash.c
 )
 
-add_executable(lazyplay ${SOURCES} ${PLAYFAIR_SOURCES})
+add_executable(lazyplay WIN32 ${SOURCES} ${PLAYFAIR_SOURCES})
 
 target_include_directories(lazyplay PRIVATE ${FFMPEG_DIR})
 
@@ -106,4 +106,7 @@ target_link_libraries(lazyplay PRIVATE
     ole32
     iphlpapi
     bcrypt
+    advapi32
+    shell32
+    uuid
 )

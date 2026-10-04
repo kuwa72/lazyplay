@@ -1,17 +1,21 @@
 #include <winsock2.h>
 #include <windows.h>
 #include <windowsx.h>
+#include <shellapi.h>
 #include <iostream>
 #include <string>
 #include <vector>
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <cstdio>
+#include <cstdlib>
 
 #include "renderer_d3d11.h"
 #include "decoder_d3d11.h"
 #include "mdns_sd.h"
 #include "rtsp_server.h"
+#include "audio_wasapi.h"
 
 // Global Application Instance
 D3D11Renderer* g_renderer = nullptr;
@@ -34,6 +38,7 @@ std::string SanitizeHostLabel(const std::string& name) {
 #define IDM_TOGGLE_FULLSCREEN 1001
 #define IDM_MONITOR_NEXT     1002
 #define IDM_APP_EXIT         1003
+#define IDM_AUDIO_BASE       2000 // 2000 = System default, 2001.. = render endpoints
 
 // Simple tap detection for tablet control. A quick press/release with little
 // movement is treated as a tap and opens the control menu.
@@ -66,6 +71,30 @@ static void AllowSystemSleep() {
     SetThreadExecutionState(ES_CONTINUOUS);
 }
 
+// Persisted audio output selection (HKCU\Software\lazyplay).
+static std::wstring LoadRegString(const wchar_t* name) {
+    wchar_t buf[512] = {};
+    DWORD size = sizeof(buf), type = 0;
+    if (RegGetValueW(HKEY_CURRENT_USER, L"Software\\lazyplay", name, RRF_RT_REG_SZ,
+                     &type, buf, &size) != ERROR_SUCCESS || type != REG_SZ) {
+        return L"";
+    }
+    return buf;
+}
+
+static void SaveAudioDevice(const std::wstring& id, const std::wstring& name) {
+    HKEY key = nullptr;
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\lazyplay", 0, nullptr, 0,
+                        KEY_SET_VALUE, nullptr, &key, nullptr) != ERROR_SUCCESS) return;
+    RegSetValueExW(key, L"AudioDeviceId", 0, REG_SZ,
+                   reinterpret_cast<const BYTE*>(id.c_str()),
+                   static_cast<DWORD>((id.size() + 1) * sizeof(wchar_t)));
+    RegSetValueExW(key, L"AudioDeviceName", 0, REG_SZ,
+                   reinterpret_cast<const BYTE*>(name.c_str()),
+                   static_cast<DWORD>((name.size() + 1) * sizeof(wchar_t)));
+    RegCloseKey(key);
+}
+
 static void ShowControlMenu(HWND hwnd) {
     HMENU hMenu = CreatePopupMenu();
     if (!hMenu) return;
@@ -73,6 +102,27 @@ static void ShowControlMenu(HWND hwnd) {
     AppendMenuW(hMenu, MF_STRING, IDM_TOGGLE_FULLSCREEN, L"Toggle fullscreen");
     UINT monitorEnabled = (g_renderer && g_renderer->IsFullscreen()) ? MF_ENABLED : MF_GRAYED;
     AppendMenuW(hMenu, MF_STRING | monitorEnabled, IDM_MONITOR_NEXT, L"Move to next display");
+    AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
+
+    // Audio output submenu: "System default" follows the Windows default
+    // endpoint; any other entry pins output to that device.
+    std::vector<WasapiEndpoint> endpoints = WasapiPlayer::EnumerateEndpoints();
+    const std::wstring selId = WasapiPlayer::SelectedEndpointId();
+    HMENU audioMenu = CreatePopupMenu();
+    AppendMenuW(audioMenu, MF_STRING | (selId.empty() ? MF_CHECKED : 0),
+                IDM_AUDIO_BASE, L"System default");
+    bool selFound = selId.empty();
+    for (size_t i = 0; i < endpoints.size(); ++i) {
+        const bool sel = (endpoints[i].id == selId);
+        selFound = selFound || sel;
+        AppendMenuW(audioMenu, MF_STRING | (sel ? MF_CHECKED : 0),
+                    static_cast<UINT>(IDM_AUDIO_BASE + 1 + i), endpoints[i].name.c_str());
+    }
+    if (!selFound) { // pinned device currently absent; keep it visible
+        const std::wstring label = L"(unplugged) " + LoadRegString(L"AudioDeviceName");
+        AppendMenuW(audioMenu, MF_STRING | MF_CHECKED | MF_GRAYED, 0, label.c_str());
+    }
+    AppendMenuW(hMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(audioMenu), L"Audio output");
     AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(hMenu, MF_STRING, IDM_APP_EXIT, L"Exit");
 
@@ -83,6 +133,18 @@ static void ShowControlMenu(HWND hwnd) {
                                               pt.x, pt.y, 0, hwnd, nullptr));
     DestroyMenu(hMenu);
     g_lastMenuTime = std::chrono::steady_clock::now();
+
+    if (cmd == IDM_AUDIO_BASE) {
+        WasapiPlayer::SelectEndpoint(L"");
+        SaveAudioDevice(L"", L"");
+        return;
+    }
+    if (cmd > IDM_AUDIO_BASE && cmd <= IDM_AUDIO_BASE + static_cast<int>(endpoints.size())) {
+        const WasapiEndpoint& ep = endpoints[cmd - IDM_AUDIO_BASE - 1];
+        WasapiPlayer::SelectEndpoint(ep.id);
+        SaveAudioDevice(ep.id, ep.name);
+        return;
+    }
 
     switch (cmd) {
     case IDM_TOGGLE_FULLSCREEN:
@@ -164,6 +226,15 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
     return DefWindowProc(hwnd, uMsg, wParam, lParam);
 }
 
+// Attached only for -console/--console: a GUI-subsystem build has no console,
+// so diagnostics go to the parent's console (cmd/PowerShell) or a new window.
+static void EnableConsole() {
+    if (!AttachConsole(ATTACH_PARENT_PROCESS) && !AllocConsole()) return;
+    std::freopen("CONOUT$", "w", stdout);
+    std::freopen("CONOUT$", "w", stderr);
+    std::freopen("CONIN$", "r", stdin);
+}
+
 int main(int argc, char* argv[]) {
     std::string deviceName = "lazyplay-display";
     uint32_t width = 1920;
@@ -171,11 +242,14 @@ int main(int argc, char* argv[]) {
     uint32_t targetFps = 30;
     bool vsync = true;
     bool startFullscreen = true; // appliance default (dot-perfect on the panel)
+    bool wantConsole = false;
 
     // Parse Command Line Arguments
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
-        if (arg == "-name" && i + 1 < argc) {
+        if (arg == "-console" || arg == "--console") {
+            wantConsole = true;
+        } else if (arg == "-name" && i + 1 < argc) {
             deviceName = argv[++i];
         } else if (arg == "-fps" && i + 1 < argc) {
             targetFps = std::stoi(argv[++i]);
@@ -196,6 +270,12 @@ int main(int argc, char* argv[]) {
             startFullscreen = false;
         }
     }
+
+    if (wantConsole) EnableConsole();
+
+    // Restore the audio output selection from the previous run before any
+    // session can start its render thread.
+    WasapiPlayer::SelectEndpoint(LoadRegString(L"AudioDeviceId"));
 
     // Per-monitor DPI awareness: the window maps 1:1 to physical pixels even
     // when the display uses Windows scaling (tablets often default to 125%+),
@@ -365,4 +445,28 @@ int main(int argc, char* argv[]) {
     AllowSystemSleep();
 
     return 0;
+}
+
+// GUI-subsystem entry points: lazyplay links as a Windows app (no console
+// window) and forwards to main() with UTF-8 argv.
+int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
+    return main(__argc, __argv);
+}
+
+int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
+    int argc = 0;
+    LPWSTR* wargv = CommandLineToArgvW(GetCommandLineW(), &argc);
+    std::vector<std::string> storage;
+    std::vector<char*> argv;
+    for (int i = 0; i < argc; ++i) {
+        int n = WideCharToMultiByte(CP_UTF8, 0, wargv[i], -1, nullptr, 0, nullptr, nullptr);
+        std::string arg(static_cast<size_t>(n > 0 ? n - 1 : 0), '\0');
+        WideCharToMultiByte(CP_UTF8, 0, wargv[i], -1, arg.data(), n, nullptr, nullptr);
+        storage.push_back(std::move(arg));
+    }
+    for (auto& s : storage) argv.push_back(s.data());
+    argv.push_back(nullptr);
+    int rc = main(argc, argv.data());
+    if (wargv) LocalFree(wargv);
+    return rc;
 }

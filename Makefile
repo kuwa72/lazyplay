@@ -5,7 +5,7 @@ CXXFLAGS = -std=c++17 -Wall -Wextra -O2 -municode -MMD -MP
 # Static-link the MinGW runtimes (libgcc/libstdc++/winpthread) so the exe
 # runs on machines without a MinGW installation
 LDFLAGS = -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lwinpthread -Wl,-Bdynamic \
-          -lws2_32 -ldnsapi -ld3d11 -ld3dcompiler -ldxva2 -lmfplat -lmfuuid -lstrmiids -lgdi32 -lole32 -liphlpapi -lbcrypt
+          -lws2_32 -ldnsapi -ld3d11 -ld3dcompiler -ldxva2 -lmfplat -lmfuuid -lstrmiids -lgdi32 -lole32 -liphlpapi -lbcrypt -ladvapi32 -lshell32 -luuid
 
 # FFmpeg: downloaded on demand and built with only the native AAC decoder.
 # This provides a GPL/LGPL-compatible implementation
@@ -95,7 +95,7 @@ src/audio_decoder.o: src/audio_decoder.cpp $(FFMPEG_STAMP)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(TARGET): $(OBJS) $(FFMPEG_LIBS)
-	$(CXX) $(OBJS) $(FFMPEG_LIBS) -o $(TARGET) $(LDFLAGS)
+	$(CXX) $(OBJS) $(FFMPEG_LIBS) -o $(TARGET) $(LDFLAGS) -mwindows
 
 TEST_OBJS = test/test_all.o src/sha512.o src/aes_ctr.o src/aes_cbc.o src/bplist.o src/fairplay.o \
        src/decoder_d3d11.o src/renderer_d3d11.o src/audio_wasapi.o src/audio_decoder.o \
