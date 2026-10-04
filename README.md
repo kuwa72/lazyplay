@@ -33,7 +33,7 @@ Use **Screen Mirroring** to send the screen and accompanying audio; media-only A
    - **iPhone / iPad**: open Control Center → Screen Mirroring → `lazyplay-display`.
    - **Mac**: open Control Center → Screen Mirroring → `lazyplay-display`.
    Your screen appears in the Windows window, with accompanying audio played through the PC's selected output device.
-3. Tap / right-click / touch-and-hold opens a control menu (Toggle fullscreen / Move to next display / Exit). You can also quit with `Esc`/`Q`.
+3. Tap / right-click / touch-and-hold opens a control menu (Toggle fullscreen / Move to next display / Audio output / Exit). You can also quit with `Esc`/`Q`.
 4. `Alt+Enter` toggles fullscreen/windowed mode; `Shift+Alt+Enter` moves fullscreen to the next display.
 
 **Firewall**: AirPlay uses inbound TCP 5000/7000 (and mDNS UDP 5353). If a
@@ -52,7 +52,7 @@ settings.
 | `lazyplay-display` does not appear | Keep lazyplay running and both devices on the same trusted LAN. Guest Wi-Fi/client isolation, VPN routing or blocked mDNS can prevent discovery. |
 | The device appears but cannot connect | Allow the actual `lazyplay.exe` through Windows Firewall on the trusted/private network. Discovery alone does not prove the streaming ports are reachable. Do not disable the firewall. |
 | Connected, but the picture stays black | Check the startup log for `Hardware decoder unavailable` and verify D3D11/H.264 hardware decoding support and GPU drivers. Protected content may be blacked out by the sender. |
-| Picture works, but no sound | Check sender and Windows volume, mute status, and Windows' selected playback device. Use Screen Mirroring, not a media-only AirPlay destination. |
+| Picture works, but no sound | Check sender and Windows volume, mute status, and Windows' selected playback device. If a device is pinned under Audio output in the control menu, make sure that device is connected. Use Screen Mirroring, not a media-only AirPlay destination. |
 | Playback stutters | Check local-network signal/congestion. After ending the current session, try restarting with `-res 720p -fps 30`; this is a troubleshooting option, not a guaranteed fix. |
 
 No PIN pairing or access control is implemented; use lazyplay only on a trusted LAN, not public or guest networks.
@@ -69,6 +69,7 @@ Remove personal information from screenshots and logs before sharing them.
 | `-res <720p\|1080p>` | Receive resolution | `1080p` |
 | `-vsync <0\|1>` | Vertical sync | `1` |
 | `-window` | Start windowed instead of fullscreen | off (fullscreen is the default) |
+| `-console` / `--console` | Attach a console and print diagnostic logs | off (no console) |
 
 * Rendering is Per-Monitor-V2 DPI aware, so the video is drawn 1:1 to
   physical pixels even under Windows display scaling (e.g. 125%). When the
@@ -76,6 +77,12 @@ Remove personal information from screenshots and logs before sharing them.
   dot-by-dot display (windowed mode loses some area to the border/title bar).
 * Designed for keyboardless tablet use: use tap / right-click / touch-and-hold
   to open the control menu. The mouse cursor is also hidden in fullscreen.
+* The control menu's **Audio output** submenu picks the render device:
+  *System default* follows the Windows default playback device; any other
+  entry pins lazyplay to that device (audio pauses silently while it is
+  unplugged and resumes when it returns). The choice is remembered across runs.
+* `lazyplay.exe` runs without a console window; pass `-console` to see the log
+  in a terminal.
 * DRM-protected content (e.g. Netflix) is not included in the mirrored
   image — this is blacked out on the macOS side by Apple's own restriction,
   the same limitation that applies to Apple TV.
