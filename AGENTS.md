@@ -11,6 +11,14 @@ Lightweight AirPlay mirroring receiver for Windows (Win32 + D3D11 + Media Founda
 - `./test/test_all.exe e2e <host> test/test.h264` — full AirPlay handshake + encrypted streaming against a running `./lazyplay.exe`
 - Regenerate the video fixture: `ffmpeg -y -f lavfi -i testsrc=size=1280x720:rate=30 -t 2 -c:v libx264 -profile:v baseline -bf 0 -g 30 -pix_fmt nv12 -f h264 test/test.h264`
 
+## Adoption docs and demo verification
+
+- `python3 scripts/Verify-Adoption.py` — checks README links, recorded measurement arithmetic and demo size/metadata; requires `ffprobe` on PATH.
+- `python3 scripts/Verify-Adoption.py --zenn-root <path-to-kuwa72/zenn>` — also validates the draft article, its local links and matching GIF.
+- `powershell.exe -NoProfile -File .\scripts\Measure-Lazyplay.ps1 -Seconds 30 -Workload mirroring` — read-only sampling of an existing Windows process; use `idle` separately. Respect the host execution policy.
+- `bash scripts/Prepare-IosDemo.sh <source.mp4> <output.gif> [output.gif ...]` — creates a silent 12-second GIF from seconds 6–18, refuses overwrites and checks the 2,500,000-byte asset limit; requires FFmpeg and GNU stat.
+- Demo media and articles need owner review before publication. Do not infer GPU load, latency, actual FPS or Atom performance from CPU/memory measurements on another machine.
+
 ## Architecture / protocol (UxPlay-compatible)
 
 - `mdns_sd.cpp` — mDNS announcer/responder for `_airplay._tcp` (7000) + `_raop._tcp` (5000). Features `0x527FFEE6,0x0`: bit 27 (legacy pairing) is **off**, so clients skip SRP pair-setup/pair-verify.

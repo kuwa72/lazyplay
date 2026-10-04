@@ -1,0 +1,35 @@
+name: Working setup / usage feedback
+description: Share a successful setup, limitations and whether you would use it again.
+title: "[Working setup] "
+body:
+  - type: input
+    id: version
+    attributes:
+      label: lazyplay version
+      description: Release tag, or commit/build details if built locally.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Receiver and sender environment
+      description: Windows version/build, PC model, GPU, sender model and iOS/iPadOS/macOS version; note unknown values.
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: What worked?
+      description: Screen, audio, reconnecting and how you used it. Include any launch options and limitations.
+    validations:
+      required: true
+  - type: textarea
+    id: first_use
+    attributes:
+      label: First-use experience and repeat use
+      description: What helped or blocked the first connection? Would you use it again, and for what? Do not include private recordings or personal information.
+  - type: textarea
+    id: performance
+    attributes:
+      label: Optional measured resource usage
+      description: Include duration, workload and CPU normalization. Distinguish working set from private bytes and identify unmeasured quantities. Remove personal information before attaching data.
